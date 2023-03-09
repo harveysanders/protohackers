@@ -1,8 +1,9 @@
-# fly.toml file generated for 0-smoke-test on 2023-03-08T16:38:29-05:00
+# fly.toml file generated for 0-smoke-test on 2023-03-09T04:16:21-05:00
 
 app = "0-smoke-test"
 kill_signal = "SIGINT"
 kill_timeout = 5
+primary_region = "lhr"
 processes = []
 
 [build]
@@ -27,13 +28,7 @@ processes = []
     type = "connections"
 
   [[services.ports]]
-    force_https = true
-    handlers = ["http"]
-    port = 80
-
-  [[services.ports]]
-    handlers = ["tls", "http"]
-    port = 443
+    port = 8080
 
   [[services.tcp_checks]]
     grace_period = "1s"
