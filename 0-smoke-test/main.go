@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log"
@@ -29,36 +30,28 @@ func main() {
 	clientID := 0
 
 	for {
-		clientID++
 		conn, err := l.Accept()
 		if err != nil {
 			log.Fatalf("accept: %s", err.Error())
 		}
 
+		clientID++
 		go handleConnection(conn, clientID)
 	}
 }
 
 func handleConnection(conn net.Conn, clientID int) {
-	msgLen := 2048
-	buf := make([]byte, msgLen)
-	bytesRead, err := conn.Read(buf)
+	var buf bytes.Buffer
+	bytesRead, err := io.Copy(&buf, conn)
 	if err != nil {
-		if err == io.EOF {
-			conn.Close()
-			return
-		}
-		log.Printf("id: %d: conn.read: %s", clientID, err.Error())
+		log.Printf("id [%d]: copy: %s", clientID, err.Error())
 		return
 	}
 
-	log.Printf("id: %d: read in %d bytes", clientID, bytesRead)
-
-	bytesWritten, err := conn.Write(buf)
+	log.Printf("id [%d]: read in %d bytes", clientID, bytesRead)
+	err = conn.Close()
 	if err != nil {
-		log.Printf("id: %d: conn.write: %s", clientID, err.Error())
+		log.Printf("id [%d]: close: %s", clientID, err.Error())
 		return
 	}
-
-	log.Printf("id: %d: wrote out %d bytes", clientID, bytesWritten)
 }
