@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -114,11 +115,12 @@ func validateReq(r request) bool {
 		return false
 	}
 
-	// Assume Number will not intentionally be set to 0.
-	// TODO: If assumption is incorrect, write a custom unmarshaler.
-	if r.Number == 0 {
+	// Differentiate from zero value for missing field.
+	// See custom unmarshal.
+	if r.Number == math.Inf(-1) {
 		return false
 	}
+	// TODO: Add more rules?
 	return true
 }
 
@@ -137,4 +139,18 @@ func isPrime(n float64) bool {
 		}
 	}
 	return true
+}
+
+func (r *request) UnmarshalJSON(data []byte) error {
+	type alias request
+	aux := alias(*r)
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	// Differentiate literal 0 from a missing "number" field
+	if !bytes.Contains(data, []byte("number")) {
+		aux.Number = math.Inf(-1)
+	}
+	*r = request(aux)
+	return nil
 }
