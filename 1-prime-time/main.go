@@ -57,19 +57,23 @@ func handleConn(c net.Conn) {
 			line, err := conn.ReadLineBytes()
 			if err != nil {
 				if errors.Is(err, io.EOF) {
-					return nil
+					if err := c.Close(); err != nil {
+						fmt.Printf("close: %v\n", err)
+						return nil
+					}
 				}
 				return fmt.Errorf("readLineBytes: %v", err)
 			}
-			// if len(line) == 0 {
-			// 	return nil
-			// }
+
+			fmt.Printf("request json: %s\n", string(line))
 
 			var req request
 			err = json.Unmarshal(line, &req)
 			if err != nil {
 				return fmt.Errorf("unmarshal: %v", err)
 			}
+
+			fmt.Printf("request parsed: %+v\n", req)
 
 			if !validateReq(req) {
 				return fmt.Errorf("invalid request: %+v", req)
@@ -85,9 +89,11 @@ func handleConn(c net.Conn) {
 			}
 
 			respData = append(respData, []byte("\n")...)
+			fmt.Printf("response: %s\n", respData)
+
 			_, err = c.Write(respData)
 			if err != nil {
-				fmt.Printf("write: %v", err)
+				fmt.Printf("write: %v\n", err)
 				return nil
 			}
 		}
@@ -96,13 +102,10 @@ func handleConn(c net.Conn) {
 	if err != nil {
 		_, err := c.Write([]byte("{}\n"))
 		if err != nil {
-			fmt.Printf("write: %v", err)
+			fmt.Printf("write: %v\n", err)
 			return
 		}
-		if err := c.Close(); err != nil {
-			fmt.Printf("close: %v", err)
-			return
-		}
+
 	}
 }
 
