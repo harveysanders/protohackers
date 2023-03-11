@@ -3,6 +3,7 @@ package meanstoend
 import (
 	"encoding/binary"
 	"fmt"
+	"net"
 )
 
 type (
@@ -52,5 +53,9 @@ func (i *QueryMessage) Parse(raw []byte) error {
 
 	i.MinTime = int32(binary.BigEndian.Uint32(raw[1:5]))
 	i.MaxTime = int32(binary.BigEndian.Uint32(raw[5:9]))
+	return nil
+}
+
+func HandleConnection(c net.Conn, clientID int) error {
 	return nil
 }

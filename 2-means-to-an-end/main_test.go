@@ -1,7 +1,13 @@
 package meanstoend_test
 
 import (
+	"bytes"
+	"errors"
+	"io"
+	"log"
+	"net"
 	"testing"
+	"time"
 
 	m2e "github.com/harveysanders/protohackers/meanstoend"
 	"github.com/stretchr/testify/require"
@@ -51,4 +57,54 @@ func TestQueryMessageParse(t *testing.T) {
 
 		require.Equal(t, tc.want, got)
 	}
+}
+
+func TestServer(t *testing.T) {
+	// Create a pipe to simulate a TCP network connection without starting a server.
+	// https://stackoverflow.com/a/41668611/5275148
+	client, server := net.Pipe()
+
+	// Fail early for any deadlock issues.
+	// Successful runs should complete well before this deadline.
+	client.SetReadDeadline(time.Now().Add(time.Second / 2))
+
+	// Run the server logic in another goroutine
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+
+		err := m2e.HandleConnection(server, 0)
+		if !errors.Is(err, io.EOF) {
+			log.Println("handle connection returned:", err)
+		}
+	}()
+
+	want := int32(101)
+	got := make([]byte, 4)
+	messages := [][]byte{
+		{0x49, 0x00, 0x00, 0x30, 0x39, 0x00, 0x00, 0x00, 0x65},
+		{0x49, 0x00, 0x00, 0x30, 0x3a, 0x00, 0x00, 0x00, 0x66},
+		{0x49, 0x00, 0x00, 0x30, 0x3b, 0x00, 0x00, 0x00, 0x64},
+		{0x49, 0x00, 0x00, 0xa0, 0x00, 0x00, 0x00, 0x00, 0x05},
+		{0x51, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00, 0x40, 0x00},
+	}
+	for _, msg := range messages {
+		nSent, err := io.Copy(client, bytes.NewReader(msg))
+		if err != nil {
+			require.NoError(t, err)
+		}
+		require.Equal(t, 9, nSent)
+	}
+
+	// Read response from server
+	_, err := client.Read(got)
+	if err != nil {
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, want, got)
+
+	client.Close()
+
+	<-done
 }

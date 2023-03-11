@@ -63,9 +63,9 @@ A query message lets the client **query the average price over a given time peri
 The message format is:
 
 ```
-Byte: | 0 | 1 2 3 4 | 5 6 7 8 |
-Type: |char | int32 | int32 |
-Value: | 'Q' | mintime | maxtime |
+Byte: | 0  | 1 2 3 4 | 5 6 7 8 |
+Type: |char|  int32  |  int32  |
+Value:|'Q' | mintime | maxtime |
 ```
 
 The first `int32` is _mintime_, the earliest timestamp of the period.
@@ -106,7 +106,7 @@ In this example, `"-->"` denotes messages from the server to the client, and `"<
 <-- 49 00 00 30 3b 00 00 00 64 I 12347 100
 <-- 49 00 00 a0 00 00 00 00 05 I 40960 5
 <-- 51 00 00 30 00 00 00 40 00 Q 12288 16384
---> 00 00 00 65 101
+--> 00 00 00 65                  101
 ```
 
 The client inserts _(timestamp,price)_ values: _(12345,101)_, _(12346,102)_, _(12347,100)_, and _(40960,5)_. The client then queries between _T=12288_ and _T=16384_. The server computes the mean price during this period, which is _101_, and sends back _101_.
