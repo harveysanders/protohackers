@@ -79,7 +79,7 @@ func TestServer(t *testing.T) {
 		}
 	}()
 
-	want := int32(101)
+	want := []byte{0x0, 0x0, 0x0, 0x65} // 101 mean
 	got := make([]byte, 4)
 	messages := [][]byte{
 		{0x49, 0x00, 0x00, 0x30, 0x39, 0x00, 0x00, 0x00, 0x65},
@@ -93,7 +93,7 @@ func TestServer(t *testing.T) {
 		if err != nil {
 			require.NoError(t, err)
 		}
-		require.Equal(t, 9, nSent)
+		require.Equal(t, int64(9), nSent)
 	}
 
 	// Read response from server
