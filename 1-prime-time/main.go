@@ -2,9 +2,7 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -15,9 +13,13 @@ import (
 )
 
 type (
+	Server struct {
+		listener net.Listener
+	}
+
 	request struct {
-		Method string  `json:"method"`
-		Number float64 `json:"number"`
+		Method string   `json:"method"`
+		Number *float64 `json:"number,omitempty"`
 	}
 
 	response struct {
@@ -26,47 +28,68 @@ type (
 	}
 )
 
+func NewServer() *Server {
+	return &Server{}
+}
+
+func (s *Server) Run(port string) (err error) {
+	l, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+
+	s.listener = l
+	fmt.Printf("Listening on port: %s\n", port)
+
+	return s.handleConnections()
+}
+
+func (s *Server) Close() error {
+	return s.listener.Close()
+}
+
 func main() {
 	port := "9000"
 	if PORT := os.Getenv("PORT"); PORT != "" {
 		port = PORT
 	}
 
-	l, err := net.Listen("tcp", ":"+port)
+	srv := NewServer()
+
+	err := srv.Run(port)
 	if err != nil {
-		log.Fatalf("listen: %s", err.Error())
-	}
-	defer l.Close()
-
-	fmt.Printf("Listening on port: %s\n", port)
-
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			log.Fatalf("accept: %s", err.Error())
-		}
-
-		go handleConn(conn)
+		log.Fatal(err)
 	}
 }
 
-func handleConn(c net.Conn) {
+func (s *Server) handleConnections() (err error) {
+	clientID := 0
+	for {
+		conn, err := s.listener.Accept()
+		if err != nil {
+			return fmt.Errorf("accept: %s", err.Error())
+		}
+		clientID++
+		go handleConnection(conn, clientID)
+	}
+}
+
+func handleConnection(c net.Conn, clientID int) {
 	lr := io.LimitReader(c, 4096)
 	conn := textproto.NewReader(bufio.NewReader(lr))
-	err := (func() error {
+	err := (func(clientID int) error {
+		reqID := 0
 		for {
+			reqID++
 			line, err := conn.ReadLineBytes()
 			if err != nil {
-				if errors.Is(err, io.EOF) {
-					if err := c.Close(); err != nil {
-						fmt.Printf("close: %v\n", err)
-						return nil
-					}
+				if err == io.EOF {
+					return err
 				}
 				return fmt.Errorf("readLineBytes: %v", err)
 			}
 
-			fmt.Printf("request json: %s\n", string(line))
+			fmt.Printf("[%d, %d] request json: %s\n", clientID, reqID, string(line))
 
 			var req request
 			err = json.Unmarshal(line, &req)
@@ -74,15 +97,13 @@ func handleConn(c net.Conn) {
 				return fmt.Errorf("unmarshal: %v", err)
 			}
 
-			fmt.Printf("request parsed: %+v\n", req)
-
 			if !validateReq(req) {
 				return fmt.Errorf("invalid request: %+v", req)
 			}
 
 			resp := response{
 				Method: "isPrime",
-				Prime:  isPrime(req.Number),
+				Prime:  isPrime(*req.Number),
 			}
 			respData, err := json.Marshal(&resp)
 			if err != nil {
@@ -90,20 +111,27 @@ func handleConn(c net.Conn) {
 			}
 
 			respData = append(respData, []byte("\n")...)
-			fmt.Printf("response: %s\n", respData)
+			fmt.Printf("[%d, %d] response: %s\n", clientID, reqID, respData)
 
 			_, err = c.Write(respData)
 			if err != nil {
-				fmt.Printf("write: %v\n", err)
+				fmt.Printf("[%d, %d] write: %v\n", clientID, reqID, err)
 				return nil
 			}
 		}
-	})()
+	})(clientID)
 
 	if err != nil {
+		if err == io.EOF {
+			if err = c.Close(); err != nil {
+				fmt.Printf("[%d] close: %v", clientID, err)
+			}
+			return
+		}
+		fmt.Printf("[%d] request error: %v \nwriting error response...\n", clientID, err)
 		_, err := c.Write([]byte("{}\n"))
 		if err != nil {
-			fmt.Printf("write: %v\n", err)
+			fmt.Printf("[%d] write: %v\n", clientID, err)
 			return
 		}
 
@@ -117,7 +145,7 @@ func validateReq(r request) bool {
 
 	// Differentiate from zero value for missing field.
 	// See custom unmarshal.
-	if r.Number == math.Inf(-1) {
+	if r.Number == nil {
 		return false
 	}
 	// TODO: Add more rules?
@@ -139,18 +167,4 @@ func isPrime(n float64) bool {
 		}
 	}
 	return true
-}
-
-func (r *request) UnmarshalJSON(data []byte) error {
-	type alias request
-	aux := alias(*r)
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	// Differentiate literal 0 from a missing "number" field
-	if !bytes.Contains(data, []byte("number")) {
-		aux.Number = math.Inf(-1)
-	}
-	*r = request(aux)
-	return nil
 }
