@@ -68,11 +68,10 @@ func TestServer(t *testing.T) {
 	// Successful runs should complete well before this deadline.
 	client.SetReadDeadline(time.Now().Add(time.Second / 2))
 
-	// Run the server logic in another goroutine
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
+	defer client.Close()
 
+	// Run the server logic in another goroutine
+	go func() {
 		err := m2e.HandleConnection(server, 0)
 		if !errors.Is(err, io.EOF) {
 			log.Println("handle connection returned:", err)
@@ -97,25 +96,45 @@ func TestServer(t *testing.T) {
 	}
 	want := []byte{0x0, 0x0, 0x0, 0x65} // 101 mean
 
-	got := make([]byte, 4)
+	t.Run("handle 9 byte messages", func(t *testing.T) {
+		got := make([]byte, 4)
 
-	for _, msg := range messages {
-		nSent, err := io.Copy(client, bytes.NewReader(msg))
+		for _, msg := range messages {
+			nSent, err := io.Copy(client, bytes.NewReader(msg))
+			if err != nil {
+				require.NoError(t, err)
+			}
+			require.Equal(t, int64(9), nSent)
+		}
+
+		// Read response from server
+		_, err := client.Read(got)
 		if err != nil {
 			require.NoError(t, err)
 		}
-		require.Equal(t, int64(9), nSent)
-	}
 
-	// Read response from server
-	_, err := client.Read(got)
-	if err != nil {
-		require.NoError(t, err)
-	}
+		require.Equal(t, want, got)
+	})
 
-	require.Equal(t, want, got)
+	t.Run("handle messages 1-byte at a time", func(t *testing.T) {
+		got := make([]byte, 4)
 
-	client.Close()
+		for _, msg := range messages {
+			for _, b := range msg {
+				_, err := io.Copy(client, bytes.NewReader([]byte{b}))
+				if err != nil {
+					require.NoError(t, err)
+				}
+			}
+		}
 
-	<-done
+		// Read response from server
+		_, err := client.Read(got)
+		if err != nil {
+			require.NoError(t, err)
+		}
+
+		require.Equal(t, want, got)
+	})
+
 }

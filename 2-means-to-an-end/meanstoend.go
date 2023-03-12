@@ -59,8 +59,9 @@ func (s *Server) Start(port string) error {
 		clientID++
 		go func(c net.Conn) {
 			if err := HandleConnection(c, clientID); err != nil {
+				log.Printf("client cause error:\n%v\nclosing connection..", err)
 				if err := c.Close(); err != nil {
-					log.Printf("close: %v\n", err)
+					log.Printf("close: %x\n", err)
 				}
 			}
 
@@ -92,15 +93,17 @@ func HandleConnection(c net.Conn, clientID int) error {
 	store := newStore()
 	mean := int32(0)
 	for {
-		n, err := c.Read(rawMsg)
+		n, err := io.ReadAtLeast(c, rawMsg, msgLen)
 		if err != nil {
 			if err == io.EOF {
 				return io.EOF
 			}
+			if err == io.ErrUnexpectedEOF {
+				log.Printf("expected 9 bytes, got %d\nmessage: %x", n, rawMsg[:n])
+				// return fmt.Errorf("expected 9 bytes, got %d\nmessage: %x", n, rawMsg[:n])
+				continue
+			}
 			return fmt.Errorf("read: %w", err)
-		}
-		if n != msgLen {
-			return fmt.Errorf("expected 9 bytes, got %d", len(rawMsg))
 		}
 
 		typ := messageType(rawMsg[0])
