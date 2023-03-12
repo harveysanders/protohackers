@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"net"
 )
 
@@ -33,7 +34,43 @@ type (
 	}
 
 	prices []price
+
+	Server struct {
+		listener net.Listener
+	}
 )
+
+func (s *Server) Start(port string) error {
+	l, err := net.Listen("tcp", ":"+port)
+	s.listener = l
+
+	if err != nil {
+		return fmt.Errorf("listen: %w", err)
+	}
+
+	clientID := 0
+
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			return fmt.Errorf("accept: %w", err)
+		}
+
+		clientID++
+		go func(c net.Conn) {
+			if err := HandleConnection(c, clientID); err != nil {
+				if err := c.Close(); err != nil {
+					log.Printf("close: %v\n", err)
+				}
+			}
+
+		}(conn)
+	}
+}
+
+func (s *Server) Stop() error {
+	return s.listener.Close()
+}
 
 func (i *InsertMessage) Parse(raw []byte) error {
 	i.Type = messageType(raw[0])

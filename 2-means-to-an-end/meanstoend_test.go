@@ -79,8 +79,15 @@ func TestServer(t *testing.T) {
 		}
 	}()
 
-	want := []byte{0x0, 0x0, 0x0, 0x65} // 101 mean
-	got := make([]byte, 4)
+	// 	        Hexadecimal:         |  Decoded:
+
+	// <-- 49 00 00 30 39 00 00 00 65 I 12345 101
+	// <-- 49 00 00 30 3a 00 00 00 66 I 12346 102
+	// <-- 49 00 00 30 3b 00 00 00 64 I 12347 100
+	// <-- 49 00 00 a0 00 00 00 00 05 I 40960 5
+	// <-- 51 00 00 30 00 00 00 40 00 Q 12288 1
+	// --> 00 00 00 65                  101
+
 	messages := [][]byte{
 		{0x49, 0x00, 0x00, 0x30, 0x39, 0x00, 0x00, 0x00, 0x65},
 		{0x49, 0x00, 0x00, 0x30, 0x3a, 0x00, 0x00, 0x00, 0x66},
@@ -88,6 +95,10 @@ func TestServer(t *testing.T) {
 		{0x49, 0x00, 0x00, 0xa0, 0x00, 0x00, 0x00, 0x00, 0x05},
 		{0x51, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00, 0x40, 0x00},
 	}
+	want := []byte{0x0, 0x0, 0x0, 0x65} // 101 mean
+
+	got := make([]byte, 4)
+
 	for _, msg := range messages {
 		nSent, err := io.Copy(client, bytes.NewReader(msg))
 		if err != nil {
