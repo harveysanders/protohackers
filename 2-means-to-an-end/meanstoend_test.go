@@ -2,10 +2,14 @@ package meanstoend_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"log"
 	"net"
+	"os"
+	"path"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -72,8 +76,9 @@ func TestServer(t *testing.T) {
 
 	// Run the server logic in another goroutine
 	go func() {
-		err := m2e.HandleConnection(server, 0)
-		if !errors.Is(err, io.EOF) {
+		ctx := context.WithValue(context.Background(), m2e.CONNECTION_ID, "test")
+		err := m2e.HandleConnection(ctx, server)
+		if err != nil && !errors.Is(err, io.EOF) {
 			log.Println("handle connection returned:", err)
 		}
 	}()
@@ -137,4 +142,29 @@ func TestServer(t *testing.T) {
 		require.Equal(t, want, got)
 	})
 
+	t.Run("works with dump files", func(t *testing.T) {
+		got := make([]byte, 4)
+		dumpPath, err := filepath.Abs("./dumps")
+		require.NoError(t, err)
+
+		dumpDir, err := os.ReadDir(dumpPath)
+		require.NoError(t, err)
+
+		for _, entry := range dumpDir {
+			dump, err := os.Open(path.Join(dumpPath, entry.Name()))
+			require.NoError(t, err)
+			_, err = io.Copy(client, dump)
+			if err != nil {
+				require.NoError(t, err)
+			}
+
+			// Read response from server
+			_, err = client.Read(got)
+			if err != nil {
+				require.NoError(t, err)
+			}
+
+			require.Equal(t, want, got)
+		}
+	})
 }

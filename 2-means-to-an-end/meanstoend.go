@@ -1,11 +1,15 @@
 package meanstoend
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"os"
+	"path"
+	"path/filepath"
 )
 
 type (
@@ -38,6 +42,12 @@ type (
 	Server struct {
 		listener net.Listener
 	}
+
+	ContextKey int
+)
+
+const (
+	CONNECTION_ID ContextKey = iota
 )
 
 func (s *Server) Start(port string) error {
@@ -57,10 +67,12 @@ func (s *Server) Start(port string) error {
 		}
 
 		clientID++
-		go func(c net.Conn) {
-			if err := HandleConnection(c, clientID); err != nil {
+		go func(conn net.Conn) {
+			ctx := context.WithValue(context.Background(), CONNECTION_ID, clientID)
+
+			if err := HandleConnection(ctx, conn); err != nil {
 				log.Printf("client cause error:\n%v\nclosing connection..", err)
-				if err := c.Close(); err != nil {
+				if err := conn.Close(); err != nil {
 					log.Printf("close: %x\n", err)
 				}
 			}
@@ -87,16 +99,27 @@ func (i *QueryMessage) Parse(raw []byte) error {
 	return nil
 }
 
-func HandleConnection(c net.Conn, clientID int) error {
+func HandleConnection(ctx context.Context, conn net.Conn) error {
 	msgLen := 9
 	rawMsg := make([]byte, msgLen)
 	store := newStore()
 	mean := int32(0)
+
+	var rdr io.Reader
+	rdr = conn
+	if len(os.Getenv("DUMP")) > 0 {
+		dumpFile, err := dumpWriter(ctx)
+		if err != nil {
+			log.Fatal(err)
+		}
+		rdr = io.TeeReader(conn, dumpFile)
+	}
+
 	for {
-		n, err := io.ReadAtLeast(c, rawMsg, msgLen)
+		n, err := io.ReadAtLeast(rdr, rawMsg, msgLen)
 		if err != nil {
 			if err == io.EOF {
-				return io.EOF
+				return nil
 			}
 			if err == io.ErrUnexpectedEOF {
 				log.Printf("expected 9 bytes, got %d\nmessage: %x", n, rawMsg[:n])
@@ -113,20 +136,20 @@ func HandleConnection(c net.Conn, clientID int) error {
 			if err := msg.Parse(rawMsg); err != nil {
 				return err
 			}
-			store.Insert(price{msg.Timestamp, msg.Price})
+			store.Insert(ctx, price{msg.Timestamp, msg.Price})
 		case "Q":
 			msg := QueryMessage{}
 			if err := msg.Parse(rawMsg); err != nil {
 				return err
 			}
-			mean = store.calcMean(msg.MinTime, msg.MaxTime)
-			fmt.Printf("mean: %d", mean)
+			mean = store.calcMean(ctx, msg.MinTime, msg.MaxTime)
+			fmt.Printf("mean: %d\n", mean)
 
-			_, err := c.Write(binary.BigEndian.AppendUint32([]byte{}, uint32(mean)))
+			_, err := conn.Write(binary.BigEndian.AppendUint32([]byte{}, uint32(mean)))
 			if err != nil {
 				return err
 			}
-			return c.Close()
+			return conn.Close()
 		default:
 			return fmt.Errorf(`expected type "I" or "Q", got %q`, typ)
 		}
@@ -141,7 +164,8 @@ func newStore() *store {
 }
 
 // Insert inserts the p in chronological ascending order.
-func (s *store) Insert(p price) {
+func (s *store) Insert(ctx context.Context, p price) {
+	// log.Printf("[%v] p: %+v\n", ctx.Value(CONNECTION_ID), p)
 	for i, prev := range s.prices {
 		if p.Timestamp == prev.Timestamp {
 			return
@@ -164,7 +188,8 @@ func (p prices) insert(index int, value price) prices {
 	return p
 }
 
-func (s *store) calcMean(minTime, maxTime int32) int32 {
+func (s *store) calcMean(ctx context.Context, minTime, maxTime int32) int32 {
+	// log.Printf("[%s] Q: min:%d, max: %d\nlist: %v", ctx.Value(CONNECTION_ID), minTime, maxTime, s.prices)
 	if minTime > maxTime {
 		return 0
 	}
@@ -181,4 +206,14 @@ func (s *store) calcMean(minTime, maxTime int32) int32 {
 
 	}
 	return int32(mean)
+}
+
+func dumpWriter(ctx context.Context) (io.Writer, error) {
+	filename := fmt.Sprintf("%d.txt", ctx.Value(CONNECTION_ID))
+	dumpPath, err := filepath.Abs(path.Join("../dumps", filename))
+	if err != nil {
+		return nil, err
+	}
+
+	return os.Create(dumpPath)
 }
