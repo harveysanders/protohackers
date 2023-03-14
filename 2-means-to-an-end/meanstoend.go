@@ -67,7 +67,7 @@ func (s *Server) Start(port string) error {
 		}
 
 		clientID++
-		go func(conn net.Conn) {
+		go func(conn net.Conn, clientID int) {
 			ctx := context.WithValue(context.Background(), CONNECTION_ID, clientID)
 
 			if err := HandleConnection(ctx, conn); err != nil {
@@ -77,7 +77,7 @@ func (s *Server) Start(port string) error {
 				}
 			}
 
-		}(conn)
+		}(conn, clientID)
 	}
 }
 
@@ -114,9 +114,14 @@ func HandleConnection(ctx context.Context, conn net.Conn) error {
 		}
 		rdr = io.TeeReader(conn, dumpFile)
 	}
-
+	clientId := ctx.Value(CONNECTION_ID)
+	readCount := 0
+	log.Printf("[%d] handling connection..\n", clientId)
 	for {
+		readCount += 1
+		// log.Printf("[%d:%d] reading..\n", clientId, readCount)
 		n, err := io.ReadAtLeast(rdr, rawMsg, msgLen)
+		// log.Printf("[%d:%d] read %d bytes\n", clientId, readCount, n)
 		if err != nil {
 			if err == io.EOF {
 				return nil
@@ -143,13 +148,16 @@ func HandleConnection(ctx context.Context, conn net.Conn) error {
 				return err
 			}
 			mean = store.calcMean(ctx, msg.MinTime, msg.MaxTime)
-			fmt.Printf("mean: %d\n", mean)
+			fmt.Printf("[%d] mean: %d\n", ctx.Value(CONNECTION_ID), mean)
+			if mean == 0 {
+				fmt.Printf("[%d] QUERY: %+v\nPRICES: %+v\n", ctx.Value(CONNECTION_ID), msg, store.prices)
+			}
 
 			_, err := conn.Write(binary.BigEndian.AppendUint32([]byte{}, uint32(mean)))
 			if err != nil {
 				return err
 			}
-			return conn.Close()
+			return nil
 		default:
 			return fmt.Errorf(`expected type "I" or "Q", got %q`, typ)
 		}
