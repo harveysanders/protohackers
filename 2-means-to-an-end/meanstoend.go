@@ -105,6 +105,7 @@ func HandleConnection(ctx context.Context, conn net.Conn) error {
 	store := newStore()
 	mean := int32(0)
 
+	// Write messages to file if DUMP env var set
 	var rdr io.Reader
 	rdr = conn
 	if len(os.Getenv("DUMP")) > 0 {
@@ -112,8 +113,10 @@ func HandleConnection(ctx context.Context, conn net.Conn) error {
 		if err != nil {
 			log.Fatal(err)
 		}
+		defer dumpFile.Close()
 		rdr = io.TeeReader(conn, dumpFile)
 	}
+
 	clientId := ctx.Value(CONNECTION_ID)
 	readCount := 0
 	log.Printf("[%d] handling connection..\n", clientId)
@@ -215,7 +218,7 @@ func (s *store) calcMean(ctx context.Context, minTime, maxTime int32) int32 {
 	return int32(mean)
 }
 
-func dumpWriter(ctx context.Context) (io.Writer, error) {
+func dumpWriter(ctx context.Context) (io.WriteCloser, error) {
 	filename := fmt.Sprintf("%d.txt", ctx.Value(CONNECTION_ID))
 	dumpPath, err := filepath.Abs(path.Join("../dumps", filename))
 	if err != nil {
