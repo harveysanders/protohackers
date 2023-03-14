@@ -164,7 +164,8 @@ func HandleConnection(ctx context.Context, conn net.Conn) error {
 			if err != nil {
 				return fmt.Errorf("write: %w", err)
 			}
-			return nil
+			// Close client connection on response??
+			return conn.Close()
 		default:
 			return fmt.Errorf(`expected type "I" or "Q", got %q`, typ)
 		}
