@@ -101,7 +101,7 @@ func (i *QueryMessage) Parse(raw []byte) error {
 }
 
 func HandleConnection(ctx context.Context, conn net.Conn) error {
-	err := conn.SetDeadline(time.Now().Add(time.Second * 5))
+	err := conn.SetDeadline(time.Now().Add(time.Minute * 1))
 	if err != nil {
 		return fmt.Errorf("setReadDeadline: %w", err)
 	}
@@ -132,6 +132,7 @@ func HandleConnection(ctx context.Context, conn net.Conn) error {
 		// log.Printf("[%d:%d] read %d bytes\n", clientId, readCount, n)
 		if err != nil {
 			if err == io.EOF {
+				log.Printf("[%d] *** EOF *** \n", ctx.Value(CONNECTION_ID))
 				return nil
 			}
 			if err == io.ErrUnexpectedEOF {
@@ -156,16 +157,16 @@ func HandleConnection(ctx context.Context, conn net.Conn) error {
 				return err
 			}
 
-			fmt.Printf("[%d] QUERY recv:\n%+v\n", ctx.Value(CONNECTION_ID), msg)
+			log.Printf("[%d] QUERY recv:\n[%d] %+v\n", ctx.Value(CONNECTION_ID), ctx.Value(CONNECTION_ID), msg)
 			mean = store.calcMean(ctx, msg.MinTime, msg.MaxTime)
-			fmt.Printf("[%d] mean: %d\n", ctx.Value(CONNECTION_ID), mean)
+			log.Printf("[%d] mean: %d\n", ctx.Value(CONNECTION_ID), mean)
 
 			_, err := conn.Write(binary.BigEndian.AppendUint32([]byte{}, uint32(mean)))
 			if err != nil {
 				return fmt.Errorf("write: %w", err)
 			}
-			// Close client connection on response??
-			return conn.Close()
+			// Leave connection open until EOF hit
+			log.Printf("[%d] resp sent. continuing reads to EOF...\n", ctx.Value(CONNECTION_ID))
 		default:
 			return fmt.Errorf(`expected type "I" or "Q", got %q`, typ)
 		}

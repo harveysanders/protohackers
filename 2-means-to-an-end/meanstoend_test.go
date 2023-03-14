@@ -2,7 +2,6 @@ package meanstoend_test
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"io/fs"
 	"log"
@@ -193,7 +192,7 @@ func TestServer(t *testing.T) {
 					require.NoError(t, err)
 				}
 
-				fmt.Printf("got: %v for %q\n", got, entry.Name())
+				log.Printf("got: %v for %q\n", got, entry.Name())
 				// TODO: Write better assertion
 			}(entry)
 		}

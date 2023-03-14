@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"os"
 
@@ -15,7 +14,7 @@ func main() {
 	}
 
 	srv := m2e.Server{}
-	fmt.Printf("Starting server on port: %s\n", port)
+	log.Printf("Starting server on port: %s\n", port)
 
 	if err := srv.Start(port); err != nil {
 		log.Fatal(err)
