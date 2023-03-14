@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"time"
 )
 
 type (
@@ -71,7 +72,7 @@ func (s *Server) Start(port string) error {
 			ctx := context.WithValue(context.Background(), CONNECTION_ID, clientID)
 
 			if err := HandleConnection(ctx, conn); err != nil {
-				log.Printf("client cause error:\n%v\nclosing connection..", err)
+				log.Printf("client [%d] cause error:\n%v\nclosing connection..", clientID, err)
 				if err := conn.Close(); err != nil {
 					log.Printf("close: %x\n", err)
 				}
@@ -100,6 +101,10 @@ func (i *QueryMessage) Parse(raw []byte) error {
 }
 
 func HandleConnection(ctx context.Context, conn net.Conn) error {
+	err := conn.SetDeadline(time.Now().Add(time.Second * 5))
+	if err != nil {
+		return fmt.Errorf("setReadDeadline: %w", err)
+	}
 	msgLen := 9
 	rawMsg := make([]byte, msgLen)
 	store := newStore()
@@ -151,15 +156,15 @@ func HandleConnection(ctx context.Context, conn net.Conn) error {
 				return err
 			}
 
-			fmt.Printf("[%d] QUERY recv: %+v\n", ctx.Value(CONNECTION_ID), msg)
+			fmt.Printf("[%d] QUERY recv:\n%+v\n", ctx.Value(CONNECTION_ID), msg)
 			mean = store.calcMean(ctx, msg.MinTime, msg.MaxTime)
 			fmt.Printf("[%d] mean: %d\n", ctx.Value(CONNECTION_ID), mean)
 
 			_, err := conn.Write(binary.BigEndian.AppendUint32([]byte{}, uint32(mean)))
 			if err != nil {
-				return err
+				return fmt.Errorf("write: %w", err)
 			}
-			return conn.Close()
+			return nil
 		default:
 			return fmt.Errorf(`expected type "I" or "Q", got %q`, typ)
 		}
