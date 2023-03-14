@@ -147,17 +147,16 @@ func HandleConnection(ctx context.Context, conn net.Conn) error {
 			if err := msg.Parse(rawMsg); err != nil {
 				return err
 			}
+
+			fmt.Printf("[%d] QUERY recv: %+v\n", ctx.Value(CONNECTION_ID), msg)
 			mean = store.calcMean(ctx, msg.MinTime, msg.MaxTime)
 			fmt.Printf("[%d] mean: %d\n", ctx.Value(CONNECTION_ID), mean)
-			if mean == 0 {
-				fmt.Printf("[%d] QUERY: %+v\nPRICES: %+v\n", ctx.Value(CONNECTION_ID), msg, store.prices)
-			}
 
 			_, err := conn.Write(binary.BigEndian.AppendUint32([]byte{}, uint32(mean)))
 			if err != nil {
 				return err
 			}
-			return nil
+			return conn.Close()
 		default:
 			return fmt.Errorf(`expected type "I" or "Q", got %q`, typ)
 		}
@@ -204,7 +203,7 @@ func (s *store) calcMean(ctx context.Context, minTime, maxTime int32) int32 {
 	mean := float64(0)
 	n := 0
 	for _, v := range s.prices {
-		if v.Timestamp >= maxTime {
+		if v.Timestamp > maxTime {
 			break
 		}
 		if v.Timestamp >= minTime {
