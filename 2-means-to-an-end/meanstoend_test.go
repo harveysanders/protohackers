@@ -65,7 +65,6 @@ func TestQueryMessageParse(t *testing.T) {
 }
 
 func TestServer(t *testing.T) {
-
 	port := "9867"
 	srv := m2e.Server{}
 	defer srv.Stop()
@@ -95,7 +94,9 @@ func TestServer(t *testing.T) {
 	want := []byte{0x0, 0x0, 0x0, 0x65} // 101 mean
 
 	t.Run("handle 9 byte messages", func(t *testing.T) {
-		t.Skip()
+		// Wait for server to start
+		// TODO: Better way to know if server is ready?
+		time.Sleep(time.Second / 4)
 
 		client, err := net.Dial("tcp", ":"+port)
 		require.NoError(t, err)
@@ -120,7 +121,8 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("handle messages 1-byte at a time", func(t *testing.T) {
-		t.Skip()
+		// Wait for server to start
+		time.Sleep(time.Second / 4)
 
 		client, err := net.Dial("tcp", ":"+port)
 		require.NoError(t, err)
@@ -149,7 +151,6 @@ func TestServer(t *testing.T) {
 		wg := sync.WaitGroup{}
 
 		// Wait for server to start
-		// TODO: Better way to know if server is ready?
 		time.Sleep(time.Second / 4)
 
 		dumpPath, err := filepath.Abs("./dumps")
