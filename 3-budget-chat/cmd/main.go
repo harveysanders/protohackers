@@ -13,7 +13,7 @@ func main() {
 		port = PORT
 	}
 
-	srv := chat.Server{}
+	srv := chat.NewServer()
 	log.Printf("Starting server on port: %s\n", port)
 
 	if err := srv.Start(port); err != nil {
