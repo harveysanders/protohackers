@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/textproto"
 	"regexp"
+	"strings"
 )
 
 type (
@@ -115,7 +116,12 @@ func (c *client) readPump() {
 			log.Printf("[%s] readLineBytes: %v", c.name, err)
 			break
 		}
-		c.hub.broadcast <- message{from: c.name, payload: msg}
+		var m strings.Builder
+		m.WriteString(fmt.Sprintf("[%s] ", c.name))
+		m.Write(msg)
+		m.WriteByte('\n')
+
+		c.hub.broadcast <- message{from: c.name, payload: []byte(m.String())}
 	}
 }
 

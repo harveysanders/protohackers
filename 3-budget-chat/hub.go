@@ -53,6 +53,11 @@ func (h *hub) run() {
 			client.send <- []byte(h.joinRespMsg(client.name))
 
 		case client := <-h.leave:
+			msg := fmt.Sprintf("* %s has left the building!\n", client.name)
+			h.broadcast <- message{
+				from:    client.name,
+				payload: []byte(msg),
+			}
 			h.removeClient(client)
 
 		case message := <-h.broadcast:
