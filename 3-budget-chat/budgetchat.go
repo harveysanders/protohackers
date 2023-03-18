@@ -5,11 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/textproto"
 	"regexp"
-	"sync"
 )
 
 type (
@@ -22,14 +22,11 @@ type (
 		joined bool
 		name   string
 		conn   net.Conn
+		send   chan []byte
+		hub    *hub
 	}
 
 	ctxKey string
-
-	hub struct {
-		mu      sync.Mutex
-		clients map[string]*client
-	}
 )
 
 var (
@@ -66,11 +63,8 @@ func (s *Server) HandleConnection(ctx context.Context, conn net.Conn) error {
 		return err
 	}
 
-	client := newClient(string(rawName), conn)
+	newClient(string(rawName), conn, s.hub)
 
-	s.hub.addClient(client)
-
-	// TODO: Announce Presence
 	return nil
 }
 
@@ -86,31 +80,59 @@ func ValidateName(name []byte) error {
 	return nil
 }
 
-func newClient(name string, conn net.Conn) *client {
-	return &client{
+func newClient(name string, conn net.Conn, hub *hub) *client {
+	c := &client{
 		name:   name,
 		joined: true,
 		conn:   conn,
+		send:   make(chan []byte, 1024),
+		hub:    hub,
+	}
+
+	c.hub.join <- c
+
+	go c.readPump()
+	go c.writePump()
+
+	return c
+}
+
+// ReadPump reads messages from the client's connection.
+func (c *client) readPump() {
+	defer func() {
+		c.hub.leave <- c
+		c.conn.Close()
+	}()
+
+	for {
+		conn := textproto.NewConn(c.conn)
+		msg, err := conn.ReadLineBytes()
+		if err != nil {
+			if err == io.EOF {
+				log.Printf("*** EOF ***")
+				break
+			}
+			log.Printf("[%s] readLineBytes: %v", c.name, err)
+			break
+		}
+		c.hub.broadcast <- msg
 	}
 }
 
-func newHub() *hub {
-	return &hub{
-		clients: map[string]*client{},
+func (c *client) writePump() {
+	defer func() {
+		c.conn.Close()
+	}()
+
+	for {
+		msg := <-c.send
+		n, err := c.conn.Write(msg)
+		if err != nil {
+			log.Printf("[%s] write: %v", c.name, err)
+			break
+		}
+		log.Printf("[%s] wrote %d bytes", c.name, n)
 	}
-}
-
-func (h *hub) addClient(c *client) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.clients[c.name] = c
-}
-
-func (h *hub) isNameTaken(name string) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	_, ok := h.clients[name]
-	return ok
 }
 
 func NewServer() *Server {
@@ -120,6 +142,8 @@ func NewServer() *Server {
 }
 
 func (s *Server) Start(port string) error {
+	go s.hub.run()
+
 	l, err := net.Listen("tcp", ":"+port)
 	s.listener = l
 
