@@ -9,12 +9,17 @@ import (
 // https://github.com/gorilla/websocket/tree/master/examples/chat
 
 type (
+	message struct {
+		from    string
+		payload []byte
+	}
+
 	hub struct {
 		mu      sync.Mutex
 		clients map[string]*client
 
 		// Messages to be broadcast to all chat clients.
-		broadcast chan []byte
+		broadcast chan message
 
 		// Requests to join the chat room.
 		join chan *client
@@ -29,7 +34,7 @@ func newHub() *hub {
 		clients:   map[string]*client{},
 		join:      make(chan *client),
 		leave:     make(chan *client),
-		broadcast: make(chan []byte, 1024),
+		broadcast: make(chan message, 1024),
 	}
 }
 
@@ -40,15 +45,22 @@ func (h *hub) run() {
 		case client := <-h.join:
 			h.addClient(client)
 			msg := fmt.Sprintf("%s joined the chat!", client.name)
-			h.broadcast <- []byte(msg)
+			h.broadcast <- message{
+				from:    client.name,
+				payload: []byte(msg),
+			}
 
 		case client := <-h.leave:
 			h.removeClient(client)
 
 		case message := <-h.broadcast:
 			for _, client := range h.clients {
+				// Don't send message back to sender
+				if message.from == client.name {
+					continue
+				}
 				select {
-				case client.send <- message:
+				case client.send <- message.payload:
 
 				default:
 					// Unable to send on channel for some reason.

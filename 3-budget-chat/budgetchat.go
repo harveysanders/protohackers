@@ -115,7 +115,7 @@ func (c *client) readPump() {
 			log.Printf("[%s] readLineBytes: %v", c.name, err)
 			break
 		}
-		c.hub.broadcast <- msg
+		c.hub.broadcast <- message{from: c.name, payload: msg}
 	}
 }
 
