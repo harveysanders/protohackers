@@ -2,6 +2,7 @@ package budgetchat
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 )
 
@@ -44,11 +45,12 @@ func (h *hub) run() {
 		// Incoming join request
 		case client := <-h.join:
 			h.addClient(client)
-			msg := fmt.Sprintf("%s joined the chat!", client.name)
+			msg := fmt.Sprintf("* %s joined the chat!\n", client.name)
 			h.broadcast <- message{
 				from:    client.name,
 				payload: []byte(msg),
 			}
+			client.send <- []byte(h.joinRespMsg(client.name))
 
 		case client := <-h.leave:
 			h.removeClient(client)
@@ -90,4 +92,17 @@ func (h *hub) isNameTaken(name string) bool {
 	defer h.mu.Unlock()
 	_, ok := h.clients[name]
 	return ok
+}
+
+func (h *hub) joinRespMsg(username string) string {
+	usernames := []string{}
+	for name := range h.clients {
+		if name != username {
+			usernames = append(usernames, name)
+		}
+	}
+	if len(usernames) == 0 {
+		return "* you're the first one here!\n"
+	}
+	return fmt.Sprintf("* connected users: %s\n", strings.Join(usernames, ", "))
 }
