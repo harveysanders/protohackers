@@ -14,20 +14,14 @@ processes = []
   BP_GO_TARGETS = "./cmd/"
 
 [env]
-  PORT = "8080"
+  PORT = "5000"
 
 [experimental]
   auto_rollback = true
 
 [[services]]
-  internal_port = 8080
-  processes = ["app"]
+  internal_port = 5000
   protocol = "udp"
 
-  [services.concurrency]
-    hard_limit = 25
-    soft_limit = 20
-    type = "connections"
-
   [[services.ports]]
-    port = "8080"
+    port = "5000"
