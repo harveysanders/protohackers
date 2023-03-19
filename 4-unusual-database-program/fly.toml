@@ -1,0 +1,33 @@
+# fly.toml file generated for 4-unusual-database-program on 2023-03-19T10:39:01-04:00
+
+app = "4-unusual-database-program"
+kill_signal = "SIGINT"
+kill_timeout = 5
+primary_region = "lhr"
+processes = []
+
+[build]
+  builder = "paketobuildpacks/builder:base"
+  buildpacks = ["gcr.io/paketo-buildpacks/go"]
+
+[build.args]
+  BP_GO_TARGETS = "./cmd/"
+
+[env]
+  PORT = "8080"
+
+[experimental]
+  auto_rollback = true
+
+[[services]]
+  internal_port = 8080
+  processes = ["app"]
+  protocol = "udp"
+
+  [services.concurrency]
+    hard_limit = 25
+    soft_limit = 20
+    type = "connections"
+
+  [[services.ports]]
+    port = "8080"
