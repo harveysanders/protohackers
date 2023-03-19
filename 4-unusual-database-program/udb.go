@@ -51,9 +51,9 @@ func (s *server) ServeUDP(ctx context.Context, address string) error {
 			}
 
 			msg := bytes.Trim(buffer[:n], "\n")
-			log.Printf("incoming packet!\nfrom: %s\nlen: %d\ncontents: %s\n\n", fromAddr.String(), n, msg)
 
 			if IsInsert(msg) {
+				log.Printf("** INSERT **\nfrom: %s\ncontents: %s\n\n", fromAddr.String(), msg)
 				if err := s.handleInsert(msg); err != nil {
 					done <- fmt.Errorf("handleInsert: %w", err)
 					return
@@ -61,6 +61,7 @@ func (s *server) ServeUDP(ctx context.Context, address string) error {
 				continue
 			}
 			// Assume it's a retrieve request
+			log.Printf("** QUERY **\nfrom: %s\ncontents: %s\n\n", fromAddr.String(), msg)
 			resp := s.handleRetrieve(msg)
 
 			err = pConn.SetWriteDeadline(time.Now().Add(s.writeTimeout))
@@ -75,7 +76,7 @@ func (s *server) ServeUDP(ctx context.Context, address string) error {
 				return
 			}
 
-			log.Printf("wrote response packet!\nto: %s\nlen: %d\n\n", fromAddr.String(), n)
+			log.Printf("** RESPONSE SENT **\nto: %s\ncontents: %s\n\n", fromAddr.String(), msg)
 		}
 	}()
 
