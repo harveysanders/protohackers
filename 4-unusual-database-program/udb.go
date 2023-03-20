@@ -76,7 +76,7 @@ func (s *server) ServeUDP(ctx context.Context, address string) error {
 			msg = bytes.Trim(msg, "\n")
 
 			if IsInsert(msg) {
-				log.Printf("** INSERT **\nfrom: %s\ncontents: %s\n*************\n", fromAddr.String(), msg)
+				// log.Printf("** INSERT **\nfrom: %s\ncontents: %s\n*************\n", fromAddr.String(), msg)
 				if err := s.handleInsert(msg); err != nil {
 					done <- fmt.Errorf("handleInsert: %w", err)
 					return
@@ -84,7 +84,7 @@ func (s *server) ServeUDP(ctx context.Context, address string) error {
 				continue
 			}
 			// Assume it's a retrieve request
-			log.Printf("** QUERY **\nfrom: %s\ncontents: %s\n*************\n", fromAddr.String(), msg)
+			// log.Printf("** QUERY **\nfrom: %s\ncontents: %s\n*************\n", fromAddr.String(), msg)
 			resp := s.handleQuery(msg)
 
 			err = pConn.SetWriteDeadline(time.Now().Add(s.writeTimeout))
@@ -98,8 +98,8 @@ func (s *server) ServeUDP(ctx context.Context, address string) error {
 				done <- err
 				return
 			}
-			log.Printf("STORE: %s\n", s.store.String())
-			log.Printf("** RESPONSE SENT **\nto: %s\ncontents: %s\n*************\n", fromAddr.String(), resp)
+			// log.Printf("STORE: %s\n", s.store.String())
+			// log.Printf("** RESPONSE SENT **\nto: %s\ncontents: %s\n*************\n", fromAddr.String(), resp)
 		}
 	}()
 
@@ -160,7 +160,7 @@ func (s *storeSyncMap) Retrieve(k []byte) (value []byte, ok bool) {
 	}
 	bv, ok := v.([]byte)
 	if !ok {
-		log.Printf("could not convert value, %+v, to byte slice", v)
+		// log.Printf("could not convert value, %+v, to byte slice", v)
 		return []byte{}, false
 	}
 	return bv, true
