@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,11 +18,13 @@ type (
 		writeTimeout  time.Duration
 		maxBufferSize int
 		store         store
+		version       string
 	}
 
 	store interface {
 		Insert(key []byte, value []byte)
 		Retrieve(key []byte) (value []byte, ok bool)
+		fmt.Stringer
 	}
 
 	storeSyncMap struct {
@@ -34,11 +38,17 @@ type (
 )
 
 func NewServer(store store) *server {
+	version := "alpha"
+	if UDB_VERSION := os.Getenv("UDB_VERSION"); UDB_VERSION != "" {
+		version = UDB_VERSION
+	}
+
 	return &server{
 		readTimeout:   time.Second * 10,
 		writeTimeout:  time.Second * 10,
 		maxBufferSize: 1024,
 		store:         store,
+		version:       version,
 	}
 }
 
@@ -60,7 +70,10 @@ func (s *server) ServeUDP(ctx context.Context, address string) error {
 				return
 			}
 
-			msg := bytes.Trim(buffer[:n], "\n")
+			// Copy contents to new slice so we don't reference the data in the ever-changing buffer.
+			msg := make([]byte, n)
+			copy(msg, buffer[:n])
+			msg = bytes.Trim(msg, "\n")
 
 			if IsInsert(msg) {
 				log.Printf("** INSERT **\nfrom: %s\ncontents: %s\n*************\n", fromAddr.String(), msg)
@@ -72,7 +85,7 @@ func (s *server) ServeUDP(ctx context.Context, address string) error {
 			}
 			// Assume it's a retrieve request
 			log.Printf("** QUERY **\nfrom: %s\ncontents: %s\n*************\n", fromAddr.String(), msg)
-			resp := s.handleRetrieve(msg)
+			resp := s.handleQuery(msg)
 
 			err = pConn.SetWriteDeadline(time.Now().Add(s.writeTimeout))
 			if err != nil {
@@ -85,7 +98,7 @@ func (s *server) ServeUDP(ctx context.Context, address string) error {
 				done <- err
 				return
 			}
-
+			log.Printf("STORE: %s\n", s.store.String())
 			log.Printf("** RESPONSE SENT **\nto: %s\ncontents: %s\n*************\n", fromAddr.String(), resp)
 		}
 	}()
@@ -115,7 +128,10 @@ func (s *server) handleInsert(q []byte) error {
 	return nil
 }
 
-func (s *server) handleRetrieve(key []byte) (resp []byte) {
+func (s *server) handleQuery(key []byte) (resp []byte) {
+	if bytes.EqualFold(key, []byte("version")) {
+		return []byte("version=" + s.version)
+	}
 	v, ok := s.store.Retrieve(key)
 	if !ok {
 		// If a request attempts to retrieve a key for which no value exists, the server can return a response as if the key had the empty value (e.g. "key=")
@@ -150,6 +166,20 @@ func (s *storeSyncMap) Retrieve(k []byte) (value []byte, ok bool) {
 	return bv, true
 }
 
+func (s *storeSyncMap) String() string {
+	var res strings.Builder
+	s.store.Range(func(key, value any) bool {
+		res.WriteString(key.(string) + "=")
+		if _, err := res.Write(value.([]byte)); err != nil {
+			log.Printf("string() write: %v", err)
+			return false
+		}
+		res.WriteRune('\n')
+		return true
+	})
+	return res.String()
+}
+
 func NewStoreMap() *storeMap {
 	return &storeMap{
 		mu:    sync.Mutex{},
@@ -168,4 +198,14 @@ func (s *storeMap) Retrieve(k []byte) (value []byte, ok bool) {
 	v, ok := s.store[string(k)]
 	s.mu.Unlock()
 	return v, ok
+}
+
+func (s *storeMap) String() string {
+	var str strings.Builder
+	for k, v := range s.store {
+		str.WriteString(k + "=")
+		str.Write(v)
+		str.WriteRune('\n')
+	}
+	return str.String()
 }
