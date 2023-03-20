@@ -1,0 +1,24 @@
+[Sun Mar 19 20:32:47 2023 UTC] [0simple.test] NOTE:check starts
+[Sun Mar 19 20:32:47 2023 UTC] [0simple.test] PASS
+[Sun Mar 19 20:32:48 2023 UTC] [1users.test] NOTE:check starts
+[Sun Mar 19 20:32:48 2023 UTC] [1users.test] NOTE:inserting 20 usernames and checking them
+[Sun Mar 19 20:32:48 2023 UTC] [1users.test] NOTE:wrong value for 'user.43964': got 'BlueEdward92', expected 'BigHatter325'
+[Sun Mar 19 20:32:48 2023 UTC] [1users.test] NOTE:wrong value for 'user.43963': got 'BlueEdward926', expected 'GreenSmith559'
+[Sun Mar 19 20:32:48 2023 UTC] [1users.test] NOTE:wrong value for 'user.43952': got 'BlueEdward926', expected 'RichCaster360'
+[Sun Mar 19 20:32:48 2023 UTC] [1users.test] NOTE:wrong value for 'user.43958': got 'BlueEdward9', expected 'SmallBob302'
+[Sun Mar 19 20:32:48 2023 UTC] [1users.test] NOTE:wrong value for 'user.43949': got 'BlueEdwar', expected 'BigDev265'
+[Sun Mar 19 20:32:48 2023 UTC] [1users.test] NOTE:wrong value for 'user.43955': got 'BlueEdward9', expected 'SmallDev210'
+[Sun Mar 19 20:32:48 2023 UTC] [1users.test] NOTE:wrong value for 'user.43960': got 'BlueEdward', expected 'RedFred191'
+[Sun Mar 19 20:32:48 2023 UTC] [1users.test] NOTE:wrong value for 'user.43951': got 'BlueEdward926', expected 'RichCaster737'
+[Sun Mar 19 20:32:48 2023 UTC] [1users.test] NOTE:wrong value for 'user.43956': got 'BlueEdward9269', expected 'CrazyNewbie967'
+[Sun Mar 19 20:32:48 2023 UTC] [1users.test] NOTE:wrong value for 'user.43957': got 'BlueEdward92', expected 'PoorSmith169'
+[Sun Mar 19 20:32:48 2023 UTC] [1users.test] NOTE:wrong value for 'user.43962': got 'BlueEdward926', expected 'GreenCoder299'
+[Sun Mar 19 20:32:49 2023 UTC] [1users.test] NOTE:wrong value for 'user.43953': got 'BlueEdward926', expected 'CrazyFrank221'
+[Sun Mar 19 20:32:49 2023 UTC] [1users.test] NOTE:wrong value for 'user.43954': got 'BlueEdward92', expected 'ProtoFred116'
+[Sun Mar 19 20:32:49 2023 UTC] [1users.test] NOTE:wrong value for 'user.43948': got 'BlueEdward926', expected 'TinyEdward385'
+[Sun Mar 19 20:32:49 2023 UTC] [1users.test] NOTE:wrong value for 'user.43961': got 'BlueEdward9', expected 'RedCoder738'
+[Sun Mar 19 20:32:49 2023 UTC] [1users.test] NOTE:wrong value for 'user.43950': got 'BlueEdward9', expected 'SmallBob270'
+[Sun Mar 19 20:32:49 2023 UTC] [1users.test] NOTE:wrong value for 'user.43959': got 'BlueEdward9269', expected 'ProtoNewbie189'
+[Sun Mar 19 20:32:49 2023 UTC] [1users.test] NOTE:wrong value for 'user.43947': got 'BlueEdward9269', expected 'LargeNewbie777'
+[Sun Mar 19 20:32:49 2023 UTC] [1users.test] NOTE:wrong value for 'user.43965': got 'BlueEdward', expected 'PoorDev203'
+[Sun Mar 19 20:32:49 2023 UTC] [1users.test] FAIL:more than 10% incorrect responses (19 incorrect / 40 queries)
