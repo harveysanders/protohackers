@@ -10,7 +10,8 @@ import (
 )
 
 func main() {
-	srv := udb.NewServer()
+	store := udb.NewStoreMap()
+	srv := udb.NewServer(store)
 	host := "fly-global-services"
 	if HOST := os.Getenv("HOST"); HOST != "" {
 		host = HOST
