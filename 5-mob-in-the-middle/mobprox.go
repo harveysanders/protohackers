@@ -103,29 +103,31 @@ func (c *client) proxy(ctx context.Context, dst io.WriteCloser, src io.ReadClose
 
 	// Read from the source connection
 	buf := make([]byte, 1024)
-	nRead, err := src.Read(buf)
-	if err != nil {
-		log.Printf("[%s]read error: %v\n", srcName, err)
-		dst.Close()
-		src.Close()
-		return
+	for {
+		nRead, err := src.Read(buf)
+		if err != nil {
+			log.Printf("[%s]read error: %v\n", srcName, err)
+			dst.Close()
+			src.Close()
+			return
+		}
+
+		// Grab the only the message bytes from the buffer
+		msg := make([]byte, nRead)
+		copy(msg, buf)
+		log.Printf("\n← [%s]:\n%s\n", srcName, msg)
+
+		// Proxy the message out to the destination
+		nWrote, err := dst.Write(msg)
+		if err != nil {
+			log.Printf("[%s]write error: %v\n", dstName, err)
+			dst.Close()
+			src.Close()
+			return
+		}
+
+		log.Printf("\n→ [%s] (%d B):\n%s\n", dstName, nWrote, msg)
 	}
-
-	// Grab the only the message bytes from the buffer
-	msg := make([]byte, nRead)
-	copy(msg, buf)
-	log.Printf("\n← [%s]:\n%s\n", srcName, msg)
-
-	// Proxy the message out to the destination
-	nWrote, err := dst.Write(msg)
-	if err != nil {
-		log.Printf("[%s]write error: %v\n", dstName, err)
-		dst.Close()
-		src.Close()
-		return
-	}
-
-	log.Printf("\n→ [%s] (%d B):\n%s\n", dstName, nWrote, msg)
 }
 
 func hijackMsg(in []byte) []byte {
