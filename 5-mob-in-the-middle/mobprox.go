@@ -2,6 +2,7 @@ package mobprox
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -11,12 +12,15 @@ type (
 	Server struct {
 		listener     net.Listener
 		upstreamAddr string
+		interceptor  interceptor
+	}
+
+	interceptor interface {
+		intercept([]byte) []byte
 	}
 
 	client struct {
-		ctx  context.Context
-		up   net.Conn
-		down net.Conn
+		id string
 	}
 
 	ctxKey string
@@ -30,9 +34,10 @@ const (
 	FROM_UPSTREAM
 )
 
-func NewServer(upstreamAddr string) *Server {
+func NewServer(upstreamAddr, boguscoinAddress string) *Server {
 	return &Server{
 		upstreamAddr: upstreamAddr,
+		interceptor:  newbcoinReplacer(boguscoinAddress),
 	}
 }
 
@@ -53,7 +58,7 @@ func (s *Server) Start(port string) error {
 			log.Printf("accept: %v", err)
 			continue
 		}
-		ctx := context.WithValue(context.Background(), ctxKey(CLIENT_ID), clientID)
+		ctx := context.WithValue(context.Background(), ctxKey(CLIENT_ID), fmt.Sprintf("%d", clientID))
 
 		go func(conn net.Conn, clientID int) {
 			if err := s.handleConnection(ctx, conn); err != nil {
@@ -66,34 +71,34 @@ func (s *Server) Start(port string) error {
 	}
 }
 
-func (s *Server) handleConnection(ctx context.Context, conn net.Conn) error {
-	usConn, err := net.Dial("tcp", s.upstreamAddr)
+func (s *Server) handleConnection(ctx context.Context, down net.Conn) error {
+	up, err := net.Dial("tcp", s.upstreamAddr)
 	if err != nil {
 		return err
 	}
-	newClient(ctx, usConn, conn)
+
+	clientID := ctx.Value(CLIENT_ID).(string)
+	client := newClient(clientID)
+
+	go client.proxy(ctx, up, down, s.interceptor, FROM_CLIENT)
+	go client.proxy(ctx, down, up, s.interceptor, FROM_UPSTREAM)
 
 	return nil
 }
 
-func newClient(ctx context.Context, up, down net.Conn) *client {
-
-	client := &client{
-		ctx:  ctx,
-		up:   up,
-		down: down,
-	}
-
-	go client.proxy(ctx, up, down, hijackMsg, FROM_CLIENT)
-	go client.proxy(ctx, down, up, hijackMsg, FROM_UPSTREAM)
-
+func newClient(id string) *client {
+	client := &client{id: id}
 	return client
 }
 
 // proxy reads from the src connection,
-func (c *client) proxy(ctx context.Context, dst io.WriteCloser, src io.ReadCloser, transform func([]byte) []byte, dir direction) {
-	// TODO: Use transform
-
+func (c *client) proxy(
+	ctx context.Context,
+	dst io.WriteCloser,
+	src io.ReadCloser,
+	interceptor interceptor,
+	dir direction,
+) {
 	dstName := "CLIENT"
 	srcName := "UPSTREAM"
 	if dir == FROM_CLIENT {
@@ -106,7 +111,7 @@ func (c *client) proxy(ctx context.Context, dst io.WriteCloser, src io.ReadClose
 	for {
 		nRead, err := src.Read(buf)
 		if err != nil {
-			log.Printf("[%s]read error: %v\n", srcName, err)
+			log.Printf("[%s|%s]read error: %v\n", c.id, srcName, err)
 			dst.Close()
 			src.Close()
 			return
@@ -115,24 +120,21 @@ func (c *client) proxy(ctx context.Context, dst io.WriteCloser, src io.ReadClose
 		// Grab the only the message bytes from the buffer
 		msg := make([]byte, nRead)
 		copy(msg, buf)
-		log.Printf("\n← [%s]:\n%s\n", srcName, msg)
+
+		log.Printf("\n← [%s|%s]:\n%s\n", c.id, srcName, msg)
+
+		// Replace message contents
+		msg = interceptor.intercept(msg)
 
 		// Proxy the message out to the destination
 		nWrote, err := dst.Write(msg)
 		if err != nil {
-			log.Printf("[%s]write error: %v\n", dstName, err)
+			log.Printf("[%s|%s]write error: %v\n", c.id, dstName, err)
 			dst.Close()
 			src.Close()
 			return
 		}
 
-		log.Printf("\n→ [%s] (%d B):\n%s\n", dstName, nWrote, msg)
+		log.Printf("\n→ [%s,%s] (%d B):\n%s\n", c.id, dstName, nWrote, msg)
 	}
-}
-
-func hijackMsg(in []byte) []byte {
-	out := make([]byte, len(in))
-	// TODO: Find and replace Boguscoin addresses
-	copy(out, in)
-	return out
 }

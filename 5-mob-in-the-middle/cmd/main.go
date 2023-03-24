@@ -17,7 +17,8 @@ func main() {
 	if UPSTREAM := os.Getenv("UPSTREAM"); UPSTREAM != "" {
 		upstreamAddr = UPSTREAM
 	}
-	srv := mobprox.NewServer(upstreamAddr)
+	tonyBcoinAddress := "7YWHMfk9JZe0LM0g1ZauHuiSxhI"
+	srv := mobprox.NewServer(upstreamAddr, tonyBcoinAddress)
 
 	log.Printf("Mob Proxy starting on port: %s", port)
 
