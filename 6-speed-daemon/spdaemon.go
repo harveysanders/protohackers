@@ -71,6 +71,8 @@ func (s *Server) Start(ctx context.Context, port string) error {
 		case <-ctx.Done():
 			log.Printf("cancelled with err: %v", ctx.Err())
 			l.Close()
+		default:
+			continue
 		}
 	}
 }
