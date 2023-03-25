@@ -17,10 +17,6 @@ type (
 		dispatchers []*TicketDispatcher
 	}
 
-	Camera struct {
-		message.IAmCamera
-	}
-
 	TicketDispatcher struct {
 	}
 
@@ -112,10 +108,20 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 	}
 	switch msgType {
 	case message.TypeIAmCamera:
-		s.cams = append(s.cams, &Camera{ /* TODO: Add field values */ })
+		s.addCamera(ctx, msg, conn)
 	case message.TypeIAmDispatcher:
 		s.dispatchers = append(s.dispatchers, &TicketDispatcher{ /* TODO: Add field values */ })
 	}
+	return nil
+}
+
+func (s *Server) addCamera(ctx context.Context, msg []byte, conn net.Conn) error {
+	cam := Camera{conn: conn}
+	err := cam.UnmarshalBinary(msg)
+	if err != nil {
+		return fmt.Errorf("unmarshalBinary: %w", err)
+	}
+	s.cams = append(s.cams, &cam)
 	return nil
 }
 
