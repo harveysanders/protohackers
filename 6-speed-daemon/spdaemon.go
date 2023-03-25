@@ -41,11 +41,13 @@ func NewServer() *Server {
 	return &Server{}
 }
 
-func (s *Server) Start(port string) error {
+func (s *Server) Start(ctx context.Context, port string) error {
 	l, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
+
+	log.Printf("Speed Daemon listening @ %s", l.Addr().String())
 
 	s.listener = l
 
@@ -58,7 +60,7 @@ func (s *Server) Start(port string) error {
 
 		clientID++
 		go func(conn net.Conn, clientID int) {
-			ctx := context.WithValue(context.Background(), ctxKey(CONNECTION_ID), fmt.Sprintf("%d", clientID))
+			ctx := context.WithValue(ctx, ctxKey(CONNECTION_ID), fmt.Sprintf("%d", clientID))
 
 			if err := s.HandleConnection(ctx, conn); err != nil {
 				log.Printf("client [%d] cause error:\n%v\nclosing connection..", clientID, err)
@@ -68,6 +70,12 @@ func (s *Server) Start(port string) error {
 			}
 
 		}(conn, clientID)
+
+		select {
+		case <-ctx.Done():
+			log.Printf("cancelled with err: %v", ctx.Err())
+			l.Close()
+		}
 	}
 }
 
@@ -89,15 +97,18 @@ func (s *Server) HandleConnection(ctx context.Context, conn net.Conn) error {
 
 // AddClient identifies a client from it's message type and add them to the appropriate client bucket (cams or dispatchers).
 func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
-	var msg []byte
-	_, err := conn.Read(msg)
+	buf := make([]byte, 1024)
+	n, err := conn.Read(buf)
 	if err != nil {
-		return &ServerError{fmt.Sprintf("read: %w", err)}
+		return &ServerError{fmt.Sprintf("read: %v", err)}
 	}
+
+	msg := make([]byte, n)
+	copy(msg, buf)
 
 	msgType, err := message.ParseType(msg[0])
 	if err != nil {
-		return &ClientError{fmt.Sprintf("read: %w", err)}
+		return &ClientError{fmt.Sprintf("read: %v", err)}
 	}
 	switch msgType {
 	case message.TypeIAmCamera:
