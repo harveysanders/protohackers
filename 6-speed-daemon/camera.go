@@ -3,15 +3,15 @@ package spdaemon
 import (
 	"encoding/binary"
 	"net"
-
-	"github.com/harveysanders/protohackers/spdaemon/message"
 )
 
 type (
 	// Each camera is on a specific road, at a specific location, and has a specific speed limit.
 	Camera struct {
-		conn net.Conn
-		message.IAmCamera
+		conn  net.Conn
+		Road  uint16
+		Mile  uint16
+		Limit uint16
 	}
 )
 
