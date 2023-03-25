@@ -94,25 +94,48 @@ func (s *Server) HandleConnection(ctx context.Context, conn net.Conn) error {
 // AddClient identifies a client from it's message type and add them to the appropriate client bucket (cams or dispatchers).
 func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 	buf := make([]byte, 1024)
-	n, err := conn.Read(buf)
-	if err != nil {
-		return &ServerError{fmt.Sprintf("read: %v", err)}
-	}
+	clientID := ctx.Value(CONNECTION_ID)
+	for {
+		n, err := conn.Read(buf)
+		if err != nil {
+			return &ServerError{fmt.Sprintf("read: %v", err)}
+		}
+		for offset := 0; offset < n; {
+			// Read the first byte to get the message type
+			msgType, err := message.ParseType(buf[offset])
+			if err != nil {
+				return &ClientError{fmt.Sprintf("read: %v", err)}
+			}
 
-	msg := make([]byte, n)
-	copy(msg, buf)
+			// Get the expected length of the message
+			// Start at the 2nd byte, since first is the message type
+			msgLen := msgType.Len(buf[offset:])
+			// Create a byte slice for the message size
+			msg := make([]byte, msgLen)
+			// Copy needed bytes from buffer
+			copy(msg, buf[offset:])
+			// Move offset
+			offset += msgLen
+			// Handle message
 
-	msgType, err := message.ParseType(msg[0])
-	if err != nil {
-		return &ClientError{fmt.Sprintf("read: %v", err)}
+			switch msgType {
+			case message.TypeIAmCamera:
+				log.Printf("[%s]TypeIAmCamera: %x", clientID, msg)
+				s.addCamera(ctx, msg, conn)
+			case message.TypeIAmDispatcher:
+				log.Printf("[%s]TypeIAmDispatcher: %x", clientID, msg)
+				s.dispatchers = append(s.dispatchers, &TicketDispatcher{ /* TODO: Add field values */ })
+			case message.TypePlate:
+				log.Printf("[%s]TypePlate: %x", clientID, msg)
+			case message.TypeTicket:
+				log.Printf("[%s]TypeTicket: %x", clientID, msg)
+			case message.TypeWantHeartbeat:
+				log.Printf("[%s]TypeWantHeartbeat: %x", clientID, msg)
+			case message.TypeHeartbeat:
+				log.Printf("[%s]TypeHeartbeat: %x", clientID, msg)
+			}
+		}
 	}
-	switch msgType {
-	case message.TypeIAmCamera:
-		s.addCamera(ctx, msg, conn)
-	case message.TypeIAmDispatcher:
-		s.dispatchers = append(s.dispatchers, &TicketDispatcher{ /* TODO: Add field values */ })
-	}
-	return nil
 }
 
 func (s *Server) addCamera(ctx context.Context, msg []byte, conn net.Conn) error {

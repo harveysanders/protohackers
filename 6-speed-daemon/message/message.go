@@ -55,6 +55,52 @@ const (
 	TypeIAmDispatcher MsgType = 0x81 // (Client->Server)
 )
 
+// Len returns the expected length of the message of the given type. This includes 1 byte for the message type uint8 itself.
+func (t MsgType) Len(buf []byte) int {
+	// Message type is the first byte of all messages
+	headerLen := 1
+	switch t {
+	case TypePlate:
+		// Read "plate" str len +1 for str header
+		plateLen := uint8(buf[headerLen]) + 1
+		timestampLen := 4
+		return headerLen + int(plateLen) + timestampLen
+	case TypeTicket:
+		// plate: str +1 for str header
+		plateLen := uint8(buf[headerLen]) + 1
+		return headerLen + int(plateLen) +
+			// road: u16
+			2 +
+			// mile1: u16
+			2 +
+			// timestamp1: u32
+			4 +
+			// mile2: u16
+			2 +
+			// timestamp2: u32
+			4 +
+			// speed: u16
+			2
+	case TypeWantHeartbeat:
+		// interval: u32
+		return headerLen + 4
+	case TypeHeartbeat:
+		// No fields
+		return headerLen + 0
+	case TypeIAmCamera:
+		// road: u16
+		// mile: u16
+		// limit: u16
+		return headerLen + 3*2
+	case TypeIAmDispatcher:
+		// numroads: u8
+		numroads := uint8(buf[headerLen])
+		// roads: [u16]
+		return headerLen + int(numroads)*4
+	}
+	return 0
+}
+
 func ParseType(raw uint8) (MsgType, error) {
 	switch raw {
 	case uint8(TypeError):
