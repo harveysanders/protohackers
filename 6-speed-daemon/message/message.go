@@ -95,8 +95,8 @@ func (t MsgType) Len(buf []byte) int {
 	case TypeIAmDispatcher:
 		// numroads: u8
 		numroads := uint8(buf[headerLen])
-		// roads: [u16]
-		return headerLen + int(numroads)*4
+		// hsg type byte + numroads byte + roads: [u16]
+		return headerLen + 1 + int(numroads)*2
 	}
 	return 0
 }
