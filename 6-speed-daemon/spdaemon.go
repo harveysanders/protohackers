@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"time"
 
 	"github.com/harveysanders/protohackers/spdaemon/message"
 )
@@ -13,8 +14,16 @@ import (
 type (
 	Server struct {
 		listener    net.Listener
-		cams        []*Camera
-		dispatchers []*TicketDispatcher
+		cams        map[uint16]map[uint16]*Camera        // [Road ID][mile]:cam
+		dispatchers map[uint16]*TicketDispatcher         // [road ID]:dispatcher
+		plates      map[uint16]map[string][]*observation // [road ID][plate]
+	}
+
+	// Observation represents an event when a car's plate was captured on a certain road at a specific time and location.
+	observation struct {
+		plate     string
+		mile      uint16
+		timestamp time.Time
 	}
 
 	TicketDispatcher struct {
@@ -34,7 +43,11 @@ type (
 const CONNECTION_ID ctxKey = "CONNECTION_ID"
 
 func NewServer() *Server {
-	return &Server{}
+	return &Server{
+		cams:        make(map[uint16]map[uint16]*Camera, 0),
+		dispatchers: make(map[uint16]*TicketDispatcher, 0),
+		plates:      make(map[uint16]map[string][]*observation, 0),
+	}
 }
 
 func (s *Server) Start(ctx context.Context, port string) error {
@@ -97,6 +110,9 @@ func (s *Server) HandleConnection(ctx context.Context, conn net.Conn) error {
 func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 	buf := make([]byte, 1024)
 	clientID := ctx.Value(CONNECTION_ID)
+	// Client will be a cam or a dispatcher
+	var meCam Camera
+
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
@@ -123,12 +139,12 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 			switch msgType {
 			case message.TypeIAmCamera:
 				log.Printf("[%s]TypeIAmCamera: %x", clientID, msg)
-				s.addCamera(ctx, msg, conn)
+				s.addCamera(ctx, msg, &meCam)
 			case message.TypeIAmDispatcher:
 				log.Printf("[%s]TypeIAmDispatcher: %x", clientID, msg)
-				s.dispatchers = append(s.dispatchers, &TicketDispatcher{ /* TODO: Add field values */ })
 			case message.TypePlate:
 				log.Printf("[%s]TypePlate: %x", clientID, msg)
+				s.handlePlate(ctx, msg, meCam)
 			case message.TypeTicket:
 				log.Printf("[%s]TypeTicket: %x", clientID, msg)
 			case message.TypeWantHeartbeat:
@@ -140,14 +156,37 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 	}
 }
 
-func (s *Server) addCamera(ctx context.Context, msg []byte, conn net.Conn) error {
-	cam := Camera{conn: conn}
-	err := cam.UnmarshalBinary(msg)
-	if err != nil {
+func (s *Server) addCamera(ctx context.Context, msg []byte, cam *Camera) error {
+	if err := cam.UnmarshalBinary(msg); err != nil {
 		return fmt.Errorf("unmarshalBinary: %w", err)
 	}
-	s.cams = append(s.cams, &cam)
+	if _, ok := s.cams[cam.Road]; !ok {
+		s.cams[cam.Road] = make(map[uint16]*Camera, 0)
+	}
+	s.cams[cam.Road][cam.Mile] = cam
 	return nil
+}
+
+func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
+	p := message.Plate{}
+	p.UnmarshalBinary(msg)
+	if _, ok := s.plates[cam.Road]; !ok {
+		s.plates[cam.Road] = make(map[string][]*observation)
+	}
+
+	// Check if plate has been seen on the same road before
+	obs, ok := s.plates[cam.Road][p.Plate]
+	if !ok {
+		// If not, register the plate
+		s.plates[cam.Road][p.Plate] = []*observation{
+			{plate: p.Plate, mile: cam.Mile, timestamp: p.Timestamp},
+		}
+	}
+	// If seen before
+	// iterate over the records and calculate the average speed
+	for _, o := range obs {
+		log.Printf("%s seen at mile %d @ %s", o.plate, o.mile, o.timestamp.Format(time.RFC3339))
+	}
 }
 
 func (e *ServerError) Error() string {

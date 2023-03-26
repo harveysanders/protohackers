@@ -1,6 +1,7 @@
 package message
 
 import (
+	"encoding/binary"
 	"fmt"
 	"time"
 )
@@ -120,4 +121,18 @@ func ParseType(raw uint8) (MsgType, error) {
 	default:
 		return TypeError, fmt.Errorf("invalid message type: %x", raw)
 	}
+}
+
+// ParseTimestamp interprets a byte slice of of a uint32 as a UNIX timestamp.
+func parseTimestamp(data []byte) time.Time {
+	// Timestamps are exactly the same as Unix timestamps (counting seconds since 1st of January 1970), except that they are unsigned.
+	ts := binary.BigEndian.Uint32(data)
+	return time.Unix(int64(ts), 0)
+}
+
+func (p *Plate) UnmarshalBinary(msg []byte) {
+	offset := 2 // msg type + data type (str) headers
+	plateLen := uint8(msg[1])
+	p.Plate = string(msg[offset : plateLen+uint8(offset)])
+	p.Timestamp = parseTimestamp(msg[2+plateLen:])
 }
