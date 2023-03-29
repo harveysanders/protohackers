@@ -21,11 +21,11 @@ type (
 	Ticket struct {
 		Plate      string // License plate value
 		Road       uint16 // Road ID
-		Mile1      uint16 // Position of observation
-		Mile2      uint16
-		Timestamp1 time.Time // uint32 // Chronologically first UNIX timestamp of observation
-		Timestamp2 time.Time // uint32 // Chronologically last UNIX timestamp of observation
-		Speed      uint16    // Average speed of the car multiplied by 100
+		Mile1      uint16 // Position of earliest observation
+		Mile2      uint16 // Position of latest observation
+		Timestamp1 uint32 // Earliest UNIX timestamp of the two observations
+		Timestamp2 uint32 // Latest UNIX timestamp of the two observations
+		Speed      uint16 // Average speed of the car multiplied by 100
 	}
 
 	WantHeartbeat struct {

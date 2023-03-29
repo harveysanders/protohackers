@@ -17,6 +17,7 @@ type (
 		cams        map[uint16]map[uint16]*Camera        // [Road ID][mile]:cam
 		dispatchers map[uint16]*TicketDispatcher         // [road ID]:dispatcher
 		plates      map[uint16]map[string][]*observation // [road ID][plate]
+		ticketQueue ticketQueue
 	}
 
 	// Observation represents an event when a car's plate was captured on a certain road at a specific time and location.
@@ -47,6 +48,7 @@ func NewServer() *Server {
 		cams:        make(map[uint16]map[uint16]*Camera, 0),
 		dispatchers: make(map[uint16]*TicketDispatcher, 0),
 		plates:      make(map[uint16]map[string][]*observation, 0),
+		ticketQueue: make(ticketQueue),
 	}
 }
 
@@ -176,17 +178,25 @@ func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
 
 	// Check if plate has been seen on the same road before
 	obs, ok := s.plates[cam.Road][p.Plate]
+	latest := observation{
+		plate:     p.Plate,
+		timestamp: p.Timestamp,
+		mile:      cam.Mile,
+	}
 	if !ok {
 		// If not, register the plate
-		s.plates[cam.Road][p.Plate] = []*observation{
-			{plate: p.Plate, mile: cam.Mile, timestamp: p.Timestamp},
-		}
+		s.plates[cam.Road][p.Plate] = []*observation{&latest}
+		return
 	}
 	// If seen before
 	// iterate over the records and calculate the average speed
-	for _, o := range obs {
-		log.Printf("%s seen at mile %d @ %s", o.plate, o.mile, o.timestamp.Format(time.RFC3339))
+	if v := checkViolation(latest, obs, float64(cam.Limit)); v != nil {
+		v.Road = cam.Road
+		log.Printf("violation: %+v", v)
+		s.ticketQueue.add(cam.Road, v)
 	}
+	// Add observation
+	s.plates[cam.Road][p.Plate] = append(s.plates[cam.Road][p.Plate], &latest)
 }
 
 func (e *ServerError) Error() string {
