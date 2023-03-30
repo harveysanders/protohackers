@@ -27,9 +27,6 @@ type (
 		timestamp time.Time
 	}
 
-	TicketDispatcher struct {
-	}
-
 	ctxKey string
 
 	ServerError struct {
@@ -114,6 +111,7 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 	clientID := ctx.Value(CONNECTION_ID)
 	// Client will be a cam or a dispatcher
 	var meCam Camera
+	var meDispatcher TicketDispatcher
 
 	for {
 		n, err := conn.Read(buf)
@@ -144,6 +142,7 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 				s.addCamera(ctx, msg, &meCam)
 			case message.TypeIAmDispatcher:
 				log.Printf("[%s]TypeIAmDispatcher: %x", clientID, msg)
+				s.addDispatcher(ctx, msg, &meDispatcher)
 			case message.TypePlate:
 				log.Printf("[%s]TypePlate: %x", clientID, msg)
 				s.handlePlate(ctx, msg, meCam)
@@ -166,6 +165,11 @@ func (s *Server) addCamera(ctx context.Context, msg []byte, cam *Camera) error {
 		s.cams[cam.Road] = make(map[uint16]*Camera, 0)
 	}
 	s.cams[cam.Road][cam.Mile] = cam
+	return nil
+}
+
+func (s *Server) addDispatcher(ctx context.Context, msg []byte, td *TicketDispatcher) error {
+	td.UnmarshalBinary(msg)
 	return nil
 }
 
