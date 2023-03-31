@@ -136,3 +136,20 @@ func (p *Plate) UnmarshalBinary(msg []byte) {
 	p.Plate = string(msg[offset : plateLen+uint8(offset)])
 	p.Timestamp = parseTimestamp(msg[2+plateLen:])
 }
+
+func (t *Ticket) MarshalBinary() []byte {
+	data := make([]byte, 0)
+	data = append(data, byte(TypeTicket))
+	// Plate
+	data = append(data, byte(len(t.Plate)))
+	data = append(data, []byte(t.Plate)...)
+
+	data = binary.BigEndian.AppendUint16(data, t.Road)
+	data = binary.BigEndian.AppendUint16(data, t.Mile1)
+	data = binary.BigEndian.AppendUint32(data, t.Timestamp1)
+	data = binary.BigEndian.AppendUint16(data, t.Mile2)
+	data = binary.BigEndian.AppendUint32(data, t.Timestamp2)
+	data = binary.BigEndian.AppendUint16(data, t.Speed)
+
+	return data
+}

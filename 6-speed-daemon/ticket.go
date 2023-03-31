@@ -9,30 +9,8 @@ import (
 
 type (
 	// [Road]tickets
-	ticketQueue map[uint16][]*message.Ticket
+	ticketQueue chan *message.Ticket
 )
-
-func (tq ticketQueue) add(road uint16, ticket *message.Ticket) {
-	if _, ok := tq[road]; !ok {
-		tq[road] = make([]*message.Ticket, 0)
-	}
-	tq[road] = append(tq[road], ticket)
-}
-
-func (tq ticketQueue) next(road uint16) *message.Ticket {
-	tickets, ok := tq[road]
-	if !ok {
-		return nil
-	}
-	if len(tickets) == 0 {
-		return nil
-	}
-
-	next := tickets[0]
-	// Remove ticket from list
-	tq[road] = tickets[1:]
-	return next
-}
 
 func checkViolation(o observation, past []*observation, limit float64) *message.Ticket {
 	for _, prev := range past {

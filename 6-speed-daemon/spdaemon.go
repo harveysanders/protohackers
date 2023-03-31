@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"time"
 
@@ -15,7 +16,7 @@ type (
 	Server struct {
 		listener    net.Listener
 		cams        map[uint16]map[uint16]*Camera        // [Road ID][mile]:cam
-		dispatchers map[uint16]*TicketDispatcher         // [road ID]:dispatcher
+		dispatchers map[uint16][]*TicketDispatcher       // [road ID]:dispatcher
 		plates      map[uint16]map[string][]*observation // [road ID][plate]
 		ticketQueue ticketQueue
 	}
@@ -43,9 +44,9 @@ const CONNECTION_ID ctxKey = "CONNECTION_ID"
 func NewServer() *Server {
 	return &Server{
 		cams:        make(map[uint16]map[uint16]*Camera, 0),
-		dispatchers: make(map[uint16]*TicketDispatcher, 0),
+		dispatchers: make(map[uint16][]*TicketDispatcher, 0),
 		plates:      make(map[uint16]map[string][]*observation, 0),
-		ticketQueue: make(ticketQueue),
+		ticketQueue: make(ticketQueue, 2048),
 	}
 }
 
@@ -58,6 +59,8 @@ func (s *Server) Start(ctx context.Context, port string) error {
 	log.Printf("Speed Daemon listening @ %s", l.Addr().String())
 
 	s.listener = l
+
+	go s.ticketListen()
 
 	clientID := 0
 	for {
@@ -138,11 +141,12 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 
 			switch msgType {
 			case message.TypeIAmCamera:
-				log.Printf("[%s]TypeIAmCamera: %x", clientID, msg)
 				s.addCamera(ctx, msg, &meCam)
+				log.Printf("[%s]TypeIAmCamera: %+v", clientID, meCam)
 			case message.TypeIAmDispatcher:
-				log.Printf("[%s]TypeIAmDispatcher: %x", clientID, msg)
+				meDispatcher.conn = conn
 				s.addDispatcher(ctx, msg, &meDispatcher)
+				log.Printf("[%s]TypeIAmDispatcher: %+v", clientID, meDispatcher)
 			case message.TypePlate:
 				log.Printf("[%s]TypePlate: %x", clientID, msg)
 				s.handlePlate(ctx, msg, meCam)
@@ -170,6 +174,13 @@ func (s *Server) addCamera(ctx context.Context, msg []byte, cam *Camera) error {
 
 func (s *Server) addDispatcher(ctx context.Context, msg []byte, td *TicketDispatcher) error {
 	td.UnmarshalBinary(msg)
+	for _, rid := range td.Roads {
+		_, ok := s.dispatchers[rid]
+		if !ok {
+			s.dispatchers[rid] = make([]*TicketDispatcher, 0)
+		}
+		s.dispatchers[rid] = append(s.dispatchers[rid], td)
+	}
 	return nil
 }
 
@@ -197,10 +208,36 @@ func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
 	if v := checkViolation(latest, obs, float64(cam.Limit)); v != nil {
 		v.Road = cam.Road
 		log.Printf("violation: %+v", v)
-		s.ticketQueue.add(cam.Road, v)
+		s.ticketQueue <- v
 	}
 	// Add observation
 	s.plates[cam.Road][p.Plate] = append(s.plates[cam.Road][p.Plate], &latest)
+}
+
+func (s *Server) ticketListen() {
+	for {
+		// Wait for dispatchers to come online
+		time.Sleep(time.Millisecond * 5)
+
+		ticket := <-s.ticketQueue
+		log.Printf("picked up ticket from queue: %+v\n", ticket)
+		// Look up dispatcher for road
+		ds, ok := s.dispatchers[ticket.Road]
+		if !ok {
+			log.Printf("no dispatchers available for road %d. Requeuing ticket..\n", ticket.Road)
+			// Put the ticket back in the queue
+			s.ticketQueue <- ticket
+			continue
+		}
+		// pick random dispatcher
+		td := ds[rand.Intn(len(ds))]
+		// Send ticket
+		if err := td.send(ticket); err != nil {
+			// TODO: Try another dispatcher
+			log.Printf("ticket dispatcher could not send ticket: %v\n", err)
+			continue
+		}
+	}
 }
 
 func (e *ServerError) Error() string {

@@ -1,10 +1,17 @@
 package spdaemon
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"fmt"
+	"net"
+
+	"github.com/harveysanders/protohackers/spdaemon/message"
+)
 
 type (
 	TicketDispatcher struct {
 		Roads []uint16 // Road IDs
+		conn  net.Conn
 	}
 )
 
@@ -17,4 +24,12 @@ func (td *TicketDispatcher) UnmarshalBinary(data []byte) {
 		road := binary.BigEndian.Uint16(data[pos : pos+roadLen])
 		td.Roads = append(td.Roads, road)
 	}
+}
+
+func (td *TicketDispatcher) send(t *message.Ticket) error {
+	_, err := td.conn.Write(t.MarshalBinary())
+	if err != nil {
+		return fmt.Errorf("write: %w", err)
+	}
+	return nil
 }
