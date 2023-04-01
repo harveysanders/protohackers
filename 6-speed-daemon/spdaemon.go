@@ -2,6 +2,7 @@ package spdaemon
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
@@ -154,6 +155,9 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 				log.Printf("[%s]TypeTicket: %x", clientID, msg)
 			case message.TypeWantHeartbeat:
 				log.Printf("[%s]TypeWantHeartbeat: %x", clientID, msg)
+				if err := s.startHeartbeat(msg, conn); err != nil {
+					return fmt.Errorf("startHeartbeat: %w", err)
+				}
 			case message.TypeHeartbeat:
 				log.Printf("[%s]TypeHeartbeat: %x", clientID, msg)
 			}
@@ -238,6 +242,28 @@ func (s *Server) ticketListen() {
 			continue
 		}
 	}
+}
+
+func (s *Server) startHeartbeat(msg []byte, conn net.Conn) error {
+	// in deciseconds
+	interval := binary.BigEndian.Uint32(msg[1:])
+	if interval < 1 {
+		return nil
+	}
+	ticker := time.NewTicker(time.Millisecond * time.Duration(interval) * 100)
+
+	go func() {
+		for {
+			<-ticker.C
+			hb := []byte{byte(message.TypeHeartbeat)}
+			if _, err := conn.Write(hb); err != nil {
+				log.Printf("write heartbeat err: %v\n", err)
+				ticker.Stop()
+			}
+			log.Println("tick")
+		}
+	}()
+	return nil
 }
 
 func (e *ServerError) Error() string {

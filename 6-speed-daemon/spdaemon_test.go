@@ -2,14 +2,84 @@ package spdaemon_test
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"testing"
 	"time"
 
 	"github.com/harveysanders/protohackers/spdaemon"
+	"github.com/harveysanders/protohackers/spdaemon/message"
 	"github.com/stretchr/testify/require"
 )
+
+func TestHeartbeat(t *testing.T) {
+	port := "9999"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go spdaemon.NewServer().Start(ctx, port)
+
+	addr := fmt.Sprintf("localhost:%s", port)
+
+	t.Run("handle 0", func(t *testing.T) {
+		// wait for server to start
+		time.Sleep(time.Second / 2)
+
+		conn, err := net.Dial("tcp", addr)
+		require.NoError(t, err)
+		defer conn.Close()
+
+		msg := []byte{0x40, 0x00, 0x00, 0x00, 0x00}
+
+		_, err = conn.Write(msg)
+		require.NoError(t, err)
+
+	})
+
+	t.Run("heartbeat interval", func(t *testing.T) {
+		// wait for server to start
+		time.Sleep(time.Second / 2)
+
+		conn, err := net.Dial("tcp", addr)
+		require.NoError(t, err)
+		defer conn.Close()
+
+		// an interval of "25" would mean a Heartbeat message every 2.5 seconds
+		interval := uint32(5) // one every .5 sec
+		msg := []byte{byte(message.TypeWantHeartbeat)}
+
+		_, err = conn.Write(binary.BigEndian.AppendUint32(msg, interval))
+		require.NoError(t, err)
+
+		beatCount := 0
+		timeout := time.Millisecond * 1100
+		timer := time.NewTimer(timeout)
+		respChan := make(chan []byte)
+		errChan := make(chan error)
+
+		go func() {
+			b := make([]byte, 1)
+			for {
+				if _, err := conn.Read(b); err != nil {
+					errChan <- err
+				}
+				respChan <- b
+			}
+		}()
+
+		for {
+			select {
+			case <-timer.C:
+				require.Equal(t, 2, beatCount)
+			case <-respChan:
+				beatCount++
+			case err := <-errChan:
+				require.NoError(t, err)
+			}
+		}
+	})
+}
 
 func TestServer(t *testing.T) {
 	port := "9999"
@@ -17,6 +87,8 @@ func TestServer(t *testing.T) {
 	defer cancel()
 
 	go spdaemon.NewServer().Start(ctx, port)
+
+	addr := fmt.Sprintf("localhost:%s", port)
 
 	t.Run("Example session", func(t *testing.T) {
 		// wait for server to start
@@ -57,7 +129,6 @@ func TestServer(t *testing.T) {
 			},
 		}
 
-		addr := fmt.Sprintf("localhost:%s", port)
 		for _, client := range clients {
 			conn, err := net.Dial("tcp", addr)
 			require.NoError(t, err)

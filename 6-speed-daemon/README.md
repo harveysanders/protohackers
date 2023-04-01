@@ -177,7 +177,7 @@ Fields:
 
 Request heartbeats.
 
-The server must now send `Heartbeat` messages to this client at the given interval, which is** specified in "deciseconds"**, of which there are 10 per second. (So an interval of "25" would mean a `Heartbeat` message every 2.5 seconds). The heartbeats help to assure the client that the server is still functioning, even in the absence of any other communication.
+The server must now send `Heartbeat` messages to this client at the given interval, which is **specified in "deciseconds"**, of which there are 10 per second. (So an interval of "25" would mean a `Heartbeat` message every 2.5 seconds). The heartbeats help to assure the client that the server is still functioning, even in the absence of any other communication.
 
 An interval of 0 deciseconds means the client does not want to receive heartbeats (this is the default setting).
 
