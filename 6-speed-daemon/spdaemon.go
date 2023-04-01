@@ -95,6 +95,7 @@ func (s *Server) Start(ctx context.Context, port string) error {
 
 func (s *Server) HandleConnection(ctx context.Context, conn net.Conn) error {
 	// Identify the client
+	clientID := ctx.Value(CONNECTION_ID)
 	err := s.addClient(ctx, conn)
 	if err != nil {
 		var clientErr *ClientError
@@ -102,7 +103,7 @@ func (s *Server) HandleConnection(ctx context.Context, conn net.Conn) error {
 		case errors.As(err, &clientErr):
 			// TODO: Marshall message.Error and send back to client
 		default: // Server Error
-			log.Printf("addClient: %v", err)
+			log.Printf("[%s] addClient: %v", clientID, err)
 		}
 		return conn.Close()
 	}
@@ -115,7 +116,12 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 	clientID := ctx.Value(CONNECTION_ID)
 	// Client will be a cam or a dispatcher
 	var meCam Camera
-	var meDispatcher TicketDispatcher
+	var heartbeatTicker *time.Ticker
+	defer func() {
+		if heartbeatTicker != nil {
+			heartbeatTicker.Stop()
+		}
+	}()
 
 	for {
 		n, err := conn.Read(buf)
@@ -145,9 +151,9 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 				s.addCamera(ctx, msg, &meCam)
 				log.Printf("[%s]TypeIAmCamera: %+v", clientID, meCam)
 			case message.TypeIAmDispatcher:
-				meDispatcher.conn = conn
-				s.addDispatcher(ctx, msg, &meDispatcher)
-				log.Printf("[%s]TypeIAmDispatcher: %+v", clientID, meDispatcher)
+				td := TicketDispatcher{conn: conn}
+				s.addDispatcher(ctx, msg, &td)
+				log.Printf("[%s]TypeIAmDispatcher: %+v\n%x", clientID, td, msg)
 			case message.TypePlate:
 				log.Printf("[%s]TypePlate: %x", clientID, msg)
 				s.handlePlate(ctx, msg, meCam)
@@ -155,7 +161,10 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 				log.Printf("[%s]TypeTicket: %x", clientID, msg)
 			case message.TypeWantHeartbeat:
 				log.Printf("[%s]TypeWantHeartbeat: %x", clientID, msg)
-				if err := s.startHeartbeat(msg, conn); err != nil {
+				if heartbeatTicker != nil {
+					return &ClientError{"WantHeartbeat already sent"}
+				}
+				if err := s.startHeartbeat(msg, conn, heartbeatTicker); err != nil {
 					return fmt.Errorf("startHeartbeat: %w", err)
 				}
 			case message.TypeHeartbeat:
@@ -191,6 +200,7 @@ func (s *Server) addDispatcher(ctx context.Context, msg []byte, td *TicketDispat
 func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
 	p := message.Plate{}
 	p.UnmarshalBinary(msg)
+	log.Printf("Plate: %+v", p)
 	if _, ok := s.plates[cam.Road]; !ok {
 		s.plates[cam.Road] = make(map[string][]*observation)
 	}
@@ -221,16 +231,20 @@ func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
 func (s *Server) ticketListen() {
 	for {
 		// Wait for dispatchers to come online
-		time.Sleep(time.Millisecond * 5)
+		time.Sleep(time.Millisecond * 500)
 
 		ticket := <-s.ticketQueue
 		log.Printf("picked up ticket from queue: %+v\n", ticket)
+		ticket.Retry()
 		// Look up dispatcher for road
 		ds, ok := s.dispatchers[ticket.Road]
-		if !ok {
+		if !ok && ticket.Retries() < 5 {
 			log.Printf("no dispatchers available for road %d. Requeuing ticket..\n", ticket.Road)
 			// Put the ticket back in the queue
 			s.ticketQueue <- ticket
+			continue
+		}
+		if len(ds) == 0 {
 			continue
 		}
 		// pick random dispatcher
@@ -244,13 +258,13 @@ func (s *Server) ticketListen() {
 	}
 }
 
-func (s *Server) startHeartbeat(msg []byte, conn net.Conn) error {
+func (s *Server) startHeartbeat(msg []byte, conn net.Conn, ticker *time.Ticker) error {
 	// in deciseconds
 	interval := binary.BigEndian.Uint32(msg[1:])
 	if interval < 1 {
 		return nil
 	}
-	ticker := time.NewTicker(time.Millisecond * time.Duration(interval) * 100)
+	ticker = time.NewTicker(time.Millisecond * time.Duration(interval) * 100)
 
 	go func() {
 		for {

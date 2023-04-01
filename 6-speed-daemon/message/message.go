@@ -26,6 +26,7 @@ type (
 		Timestamp1 uint32 // Earliest UNIX timestamp of the two observations
 		Timestamp2 uint32 // Latest UNIX timestamp of the two observations
 		Speed      uint16 // Average speed of the car multiplied by 100
+		retries    int    // Ticket dispatch attempts
 	}
 
 	WantHeartbeat struct {
@@ -152,4 +153,12 @@ func (t *Ticket) MarshalBinary() []byte {
 	data = binary.BigEndian.AppendUint16(data, t.Speed)
 
 	return data
+}
+
+func (t *Ticket) Retry() {
+	t.retries++
+}
+
+func (t *Ticket) Retries() int {
+	return t.retries
 }

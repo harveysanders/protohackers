@@ -54,6 +54,7 @@ func TestHeartbeat(t *testing.T) {
 
 		beatCount := 0
 		timeout := time.Millisecond * 1100
+		wantCount := 2
 		timer := time.NewTimer(timeout)
 		respChan := make(chan []byte)
 		errChan := make(chan error)
@@ -74,6 +75,9 @@ func TestHeartbeat(t *testing.T) {
 				require.Equal(t, 2, beatCount)
 			case <-respChan:
 				beatCount++
+				if beatCount > wantCount {
+					t.Fatalf("want %d ticks, got: %d", wantCount, beatCount)
+				}
 			case err := <-errChan:
 				require.NoError(t, err)
 			}
