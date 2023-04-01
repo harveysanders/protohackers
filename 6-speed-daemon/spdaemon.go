@@ -132,7 +132,8 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 			// Read the first byte to get the message type
 			msgType, err := message.ParseType(buf[offset])
 			if err != nil {
-				return &ClientError{fmt.Sprintf("read: %v", err)}
+				log.Printf("invalid message type: %v\n%x", err, buf[offset:offset+16])
+				return &ClientError{fmt.Sprintf("invalid message type: %v", err)}
 			}
 
 			// Get the expected length of the message
