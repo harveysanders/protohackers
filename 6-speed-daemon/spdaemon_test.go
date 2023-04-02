@@ -3,8 +3,10 @@ package spdaemon_test
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -150,4 +152,71 @@ func TestServer(t *testing.T) {
 		}
 	})
 
+	t.Run("does not issue multiple tickets for the same day", func(t *testing.T) {
+		// wait for server to start
+		time.Sleep(time.Second / 2)
+		clients := []struct {
+			name      string
+			messages  [][]byte
+			responses [][]byte
+		}{
+			{
+				name: "Cam442",
+				messages: [][]byte{
+					{0x80, 0x01, 0x5b, 0x01, 0xba, 0x00, 0x50},
+					{0x20, 0x07, 0x5a, 0x5a, 0x30, 0x34, 0x41, 0x42, 0x4e, 0x01, 0x85, 0x57, 0x04},
+				},
+			},
+			{
+				name: "Cam452",
+				messages: [][]byte{
+					{0x80, 0x01, 0x5b, 0x01, 0xc4, 0x00, 0x50},
+					{0x20, 0x07, 0x5a, 0x5a, 0x30, 0x34, 0x41, 0x42, 0x4e, 0x01, 0x85, 0x58, 0x32},
+				},
+			},
+			{
+				name: "Cam461",
+				messages: [][]byte{
+					{0x80, 0x01, 0x5b, 0x01, 0xcd, 0x00, 0x50},
+					{0x20, 0x07, 0x5a, 0x5a, 0x30, 0x34, 0x41, 0x42, 0x4e, 0x01, 0x85, 0x59, 0x6c},
+				},
+			},
+			{
+				name: "dispatcher",
+				messages: [][]byte{
+					//  IAmDispatcher{roads: [347]}
+					{0x81, 0x01, 0x01, 0x5b},
+				},
+			},
+		}
+
+		for _, client := range clients {
+			conn, err := net.Dial("tcp", addr)
+			require.NoError(t, err)
+
+			for _, msg := range client.messages {
+				n, err := conn.Write(msg)
+				require.NoError(t, err)
+				require.Greater(t, n, 0)
+			}
+
+			if client.name == "dispatcher" {
+				err := conn.SetReadDeadline(time.Now().Add(time.Second * 2))
+				require.NoError(t, err)
+				rawTickets := make([]byte, 0)
+
+				for {
+					ticketMsg := make([]byte, 25)
+					n, err := conn.Read(ticketMsg)
+					if errors.Is(err, os.ErrDeadlineExceeded) {
+						break
+					}
+					require.NoError(t, err)
+					rawTickets = append(rawTickets, ticketMsg[:n]...)
+				}
+
+				require.Len(t, rawTickets, 25, "should only issue one ticket for the same day. (Each ticket is 25 bytes)")
+			}
+		}
+	})
 }

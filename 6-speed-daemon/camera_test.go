@@ -20,6 +20,14 @@ func TestCameraUnmarshalBinary(t *testing.T) {
 			data: []byte{0x80, 0x01, 0x70, 0x04, 0xd2, 0x00, 0x28},
 			want: spdaemon.Camera{Road: 368, Mile: 1234, Limit: 40},
 		},
+		{
+			data: []byte{0x80, 0x09, 0x4b, 0x23, 0x11, 0x00, 0x64},
+			want: spdaemon.Camera{Road: 2379, Mile: 8977, Limit: 100},
+		},
+		{
+			data: []byte{0x80, 0x09, 0x4b, 0x23, 0x1b, 0x00, 0x64},
+			want: spdaemon.Camera{Road: 2379, Mile: 8987, Limit: 100},
+		},
 	}
 
 	for _, tc := range testCases {
