@@ -123,8 +123,6 @@ func TestServer(t *testing.T) {
 				messages: [][]byte{
 					//  IAmDispatcher{roads: [123]}
 					{0x81, 0x01, 0x00, 0x7b},
-					// Plate{plate: "UN1X", timestamp: 45}
-					{0x20, 0x04, 0x55, 0x4e, 0x31, 0x58, 0x00, 0x00, 0x00, 0x2d},
 				},
 				responses: [][]byte{
 					// Ticket{plate: "UN1X", road: 123, mile1: 8, timestamp1: 0, mile2: 9, timestamp2: 45, speed: 8000}

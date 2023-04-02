@@ -1,6 +1,7 @@
 package spdaemon
 
 import (
+	"bufio"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -112,64 +113,70 @@ func (s *Server) HandleConnection(ctx context.Context, conn net.Conn) error {
 
 // AddClient identifies a client from it's message type and add them to the appropriate client bucket (cams or dispatchers).
 func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
-	buf := make([]byte, 1024)
 	clientID := ctx.Value(CONNECTION_ID)
 	// Client will be a cam or a dispatcher
 	var meCam Camera
+
 	var heartbeatTicker *time.Ticker
 	defer func() {
 		if heartbeatTicker != nil {
 			heartbeatTicker.Stop()
 		}
 	}()
-
+	r := bufio.NewReader(conn)
 	for {
-		n, err := conn.Read(buf)
+		msgHdr, err := r.Peek(1)
+		if err != nil {
+			return &ServerError{fmt.Sprintf("msg header peek: %v", err)}
+		}
+		// Read the first byte to get the message type
+		msgType, err := message.ParseType(msgHdr[0])
+		if err != nil {
+			invalidMsg, err := r.Peek(10)
+			if err != nil {
+				log.Printf("problem peek invalid message: %v", err)
+			}
+			log.Printf("invalid message type: %v\n%x", err, invalidMsg)
+			return &ClientError{fmt.Sprintf("invalid message type: %v", err)}
+		}
+
+		// Calc the expected length of the message.
+		// The next 2 bytes contain enough info to calc the length of the complete message.
+		lenHdr, err := r.Peek(2)
+		if err != nil {
+			return &ServerError{fmt.Sprintf("length header peak: %v", err)}
+		}
+
+		// Read the message
+		msgLen := msgType.Len(lenHdr)
+		msg := make([]byte, msgLen)
+		n, err := r.Read(msg)
 		if err != nil {
 			return &ServerError{fmt.Sprintf("read: %v", err)}
 		}
-		for offset := 0; offset < n; {
-			// Read the first byte to get the message type
-			msgType, err := message.ParseType(buf[offset])
-			if err != nil {
-				log.Printf("invalid message type: %v\n%x", err, buf[offset:offset+16])
-				return &ClientError{fmt.Sprintf("invalid message type: %v", err)}
+		if n < msgLen {
+			return &ServerError{fmt.Sprintf("expected to read %d bytes, but only recv'd: %d", msgLen, n)}
+		}
+
+		// Handle message
+		switch msgType {
+		case message.TypeIAmCamera:
+			s.addCamera(ctx, msg, &meCam)
+			log.Printf("[%s]TypeIAmCamera: %+v", clientID, meCam)
+		case message.TypeIAmDispatcher:
+			td := TicketDispatcher{conn: conn}
+			s.addDispatcher(ctx, msg, &td)
+			log.Printf("[%s]TypeIAmDispatcher: %+v\n%x", clientID, td, msg)
+		case message.TypePlate:
+			log.Printf("[%s]TypePlate: %x", clientID, msg)
+			s.handlePlate(ctx, msg, meCam)
+		case message.TypeWantHeartbeat:
+			log.Printf("[%s]TypeWantHeartbeat: %x", clientID, msg)
+			if heartbeatTicker != nil {
+				return &ClientError{"WantHeartbeat already sent"}
 			}
-
-			// Get the expected length of the message
-			// Start at the 2nd byte, since first is the message type
-			msgLen := msgType.Len(buf[offset:])
-			// Create a byte slice for the message size
-			msg := make([]byte, msgLen)
-			// Copy needed bytes from buffer
-			copy(msg, buf[offset:])
-			// Move offset
-			offset += msgLen
-			// Handle message
-
-			switch msgType {
-			case message.TypeIAmCamera:
-				s.addCamera(ctx, msg, &meCam)
-				log.Printf("[%s]TypeIAmCamera: %+v", clientID, meCam)
-			case message.TypeIAmDispatcher:
-				td := TicketDispatcher{conn: conn}
-				s.addDispatcher(ctx, msg, &td)
-				log.Printf("[%s]TypeIAmDispatcher: %+v\n%x", clientID, td, msg)
-			case message.TypePlate:
-				log.Printf("[%s]TypePlate: %x", clientID, msg)
-				s.handlePlate(ctx, msg, meCam)
-			case message.TypeTicket:
-				log.Printf("[%s]TypeTicket: %x", clientID, msg)
-			case message.TypeWantHeartbeat:
-				log.Printf("[%s]TypeWantHeartbeat: %x", clientID, msg)
-				if heartbeatTicker != nil {
-					return &ClientError{"WantHeartbeat already sent"}
-				}
-				if err := s.startHeartbeat(msg, conn, heartbeatTicker); err != nil {
-					return fmt.Errorf("startHeartbeat: %w", err)
-				}
-			case message.TypeHeartbeat:
-				log.Printf("[%s]TypeHeartbeat: %x", clientID, msg)
+			if err := s.startHeartbeat(msg, conn, heartbeatTicker); err != nil {
+				return fmt.Errorf("startHeartbeat: %w", err)
 			}
 		}
 	}
