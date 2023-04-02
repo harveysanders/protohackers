@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/harveysanders/protohackers/spdaemon/message"
@@ -17,6 +18,7 @@ import (
 type (
 	Server struct {
 		listener    net.Listener
+		mu          sync.Mutex
 		cams        map[uint16]map[uint16]*Camera        // [Road ID][mile]:cam
 		dispatchers map[uint16][]*TicketDispatcher       // [road ID]:dispatcher
 		plates      map[uint16]map[string][]*observation // [road ID][plate]
@@ -155,14 +157,14 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 			return &ServerError{fmt.Sprintf("read: %v", err)}
 		}
 		if n < msgLen {
-			return &ServerError{fmt.Sprintf("expected to read %d bytes, but only recv'd: %d", msgLen, n)}
+			log.Printf("[%s]** expected to read %d bytes, but only recv'd: %d\nmsg: %x", clientID, msgLen, n, msg)
 		}
 
 		// Handle message
 		switch msgType {
 		case message.TypeIAmCamera:
 			s.addCamera(ctx, msg, &meCam)
-			log.Printf("[%s]TypeIAmCamera: %+v", clientID, meCam)
+			log.Printf("[%s]TypeIAmCamera: %+v\nraw: %x", clientID, meCam, msg)
 		case message.TypeIAmDispatcher:
 			td := TicketDispatcher{conn: conn}
 			s.addDispatcher(ctx, msg, &td)
@@ -186,6 +188,9 @@ func (s *Server) addCamera(ctx context.Context, msg []byte, cam *Camera) error {
 	if err := cam.UnmarshalBinary(msg); err != nil {
 		return fmt.Errorf("unmarshalBinary: %w", err)
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if _, ok := s.cams[cam.Road]; !ok {
 		s.cams[cam.Road] = make(map[uint16]*Camera, 0)
 	}
@@ -195,6 +200,8 @@ func (s *Server) addCamera(ctx context.Context, msg []byte, cam *Camera) error {
 
 func (s *Server) addDispatcher(ctx context.Context, msg []byte, td *TicketDispatcher) error {
 	td.UnmarshalBinary(msg)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for _, rid := range td.Roads {
 		_, ok := s.dispatchers[rid]
 		if !ok {
@@ -208,7 +215,12 @@ func (s *Server) addDispatcher(ctx context.Context, msg []byte, td *TicketDispat
 func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
 	p := message.Plate{}
 	p.UnmarshalBinary(msg)
-	log.Printf("Plate: %+v", p)
+
+	clientID := ctx.Value(CONNECTION_ID)
+	log.Printf("[%s]Plate: %+v", clientID, p)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if _, ok := s.plates[cam.Road]; !ok {
 		s.plates[cam.Road] = make(map[string][]*observation)
 	}
