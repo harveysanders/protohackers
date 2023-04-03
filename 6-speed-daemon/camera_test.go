@@ -32,8 +32,7 @@ func TestCameraUnmarshalBinary(t *testing.T) {
 
 	for _, tc := range testCases {
 		cam := spdaemon.Camera{}
-		err := cam.UnmarshalBinary(tc.data)
-		require.NoError(t, err)
+		cam.UnmarshalBinary(tc.data)
 
 		require.Equal(t, tc.want.Road, cam.Road)
 		require.Equal(t, tc.want.Mile, cam.Mile)

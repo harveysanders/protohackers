@@ -19,7 +19,6 @@ type (
 	Server struct {
 		listener    net.Listener
 		mu          sync.Mutex
-		cams        map[uint16]map[uint16]*Camera        // [Road ID][mile]:cam
 		dispatchers map[uint16][]*TicketDispatcher       // [road ID]:dispatcher
 		plates      map[uint16]map[string][]*observation // [road ID][plate]
 		ticketQueue ticketQueue
@@ -47,7 +46,6 @@ const CONNECTION_ID ctxKey = "CONNECTION_ID"
 
 func NewServer() *Server {
 	return &Server{
-		cams:        make(map[uint16]map[uint16]*Camera, 0),
 		dispatchers: make(map[uint16][]*TicketDispatcher, 0),
 		plates:      make(map[uint16]map[string][]*observation, 0),
 		ticketQueue: make(ticketQueue, 2048),
@@ -124,7 +122,9 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 		if heartbeatTicker != nil {
 			heartbeatTicker.Stop()
 		}
+		// TODO: Unregister dispatcher
 	}()
+
 	r := bufio.NewReader(conn)
 	for {
 		msgHdr, err := r.Peek(1)
@@ -163,11 +163,11 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 		// Handle message
 		switch msgType {
 		case message.TypeIAmCamera:
-			s.addCamera(ctx, msg, &meCam)
+			meCam.UnmarshalBinary(msg)
 			log.Printf("[%s]TypeIAmCamera: %+v\nraw: %x", clientID, meCam, msg)
 		case message.TypeIAmDispatcher:
 			td := TicketDispatcher{conn: conn}
-			s.addDispatcher(ctx, msg, &td)
+			s.registerDispatcher(ctx, msg, &td)
 			log.Printf("[%s]TypeIAmDispatcher: %+v\n%x", clientID, td, msg)
 		case message.TypePlate:
 			log.Printf("[%s]TypePlate: %x", clientID, msg)
@@ -184,24 +184,11 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 	}
 }
 
-func (s *Server) addCamera(ctx context.Context, msg []byte, cam *Camera) error {
-	if err := cam.UnmarshalBinary(msg); err != nil {
-		return fmt.Errorf("unmarshalBinary: %w", err)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.cams[cam.Road]; !ok {
-		s.cams[cam.Road] = make(map[uint16]*Camera, 0)
-	}
-	s.cams[cam.Road][cam.Mile] = cam
-	return nil
-}
-
-func (s *Server) addDispatcher(ctx context.Context, msg []byte, td *TicketDispatcher) error {
+func (s *Server) registerDispatcher(ctx context.Context, msg []byte, td *TicketDispatcher) error {
 	td.UnmarshalBinary(msg)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// TODO: Need to refactor the registrations so a dispatcher can be easily unregistered if/when it's connection is closed.
 	for _, rid := range td.Roads {
 		_, ok := s.dispatchers[rid]
 		if !ok {
