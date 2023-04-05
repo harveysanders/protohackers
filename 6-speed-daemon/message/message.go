@@ -7,7 +7,7 @@ import (
 )
 
 type (
-	MsgType uint8
+	MsgType byte
 
 	Error struct {
 		Msg string
@@ -103,21 +103,21 @@ func (t MsgType) Len(buf []byte) int {
 	return 0
 }
 
-func ParseType(raw uint8) (MsgType, error) {
+func ParseType(raw byte) (MsgType, error) {
 	switch raw {
-	case uint8(TypeError):
+	case byte(TypeError):
 		return TypeError, nil
-	case uint8(TypePlate):
+	case byte(TypePlate):
 		return TypePlate, nil
-	case uint8(TypeTicket):
+	case byte(TypeTicket):
 		return TypeTicket, nil
-	case uint8(TypeWantHeartbeat):
+	case byte(TypeWantHeartbeat):
 		return TypeWantHeartbeat, nil
-	case uint8(TypeHeartbeat):
+	case byte(TypeHeartbeat):
 		return TypeHeartbeat, nil
-	case uint8(TypeIAmCamera):
+	case byte(TypeIAmCamera):
 		return TypeIAmCamera, nil
-	case uint8(TypeIAmDispatcher):
+	case byte(TypeIAmDispatcher):
 		return TypeIAmDispatcher, nil
 	default:
 		return TypeError, fmt.Errorf("invalid message type: %x", raw)
