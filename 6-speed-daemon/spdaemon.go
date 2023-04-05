@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -19,8 +18,8 @@ type (
 	Server struct {
 		listener    net.Listener
 		mu          sync.Mutex
-		dispatchers map[uint16][]*TicketDispatcher       // [road ID]:dispatcher
-		plates      map[uint16]map[string][]*observation // [road ID][plate]
+		dispatchers map[uint16]map[*TicketDispatcher]bool // [road ID]:dispatcher
+		plates      map[uint16]map[string][]*observation  // [road ID][plate]
 		ticketQueue ticketQueue
 	}
 
@@ -46,7 +45,7 @@ const CONNECTION_ID ctxKey = "CONNECTION_ID"
 
 func NewServer() *Server {
 	return &Server{
-		dispatchers: make(map[uint16][]*TicketDispatcher, 0),
+		dispatchers: make(map[uint16]map[*TicketDispatcher]bool, 0),
 		plates:      make(map[uint16]map[string][]*observation, 0),
 		ticketQueue: make(ticketQueue, 2048),
 	}
@@ -116,13 +115,13 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 	clientID := ctx.Value(CONNECTION_ID)
 	// Client will be a cam or a dispatcher
 	var meCam Camera
-
+	var dispatcher TicketDispatcher
 	var heartbeatTicker *time.Ticker
 	defer func() {
 		if heartbeatTicker != nil {
 			heartbeatTicker.Stop()
 		}
-		// TODO: Unregister dispatcher
+		s.unregisterDispatcher(ctx, &dispatcher)
 	}()
 
 	r := bufio.NewReader(conn)
@@ -166,9 +165,9 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 			meCam.UnmarshalBinary(msg)
 			log.Printf("[%s]TypeIAmCamera: %+v\nraw: %x", clientID, meCam, msg)
 		case message.TypeIAmDispatcher:
-			td := TicketDispatcher{conn: conn}
-			s.registerDispatcher(ctx, msg, &td)
-			log.Printf("[%s]TypeIAmDispatcher: %+v\n%x", clientID, td, msg)
+			dispatcher.conn = conn
+			s.registerDispatcher(ctx, msg, &dispatcher)
+			log.Printf("[%s]TypeIAmDispatcher: %+v\n%x", clientID, dispatcher, msg)
 		case message.TypePlate:
 			log.Printf("[%s]TypePlate: %x", clientID, msg)
 			s.handlePlate(ctx, msg, meCam)
@@ -188,15 +187,24 @@ func (s *Server) registerDispatcher(ctx context.Context, msg []byte, td *TicketD
 	td.UnmarshalBinary(msg)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// TODO: Need to refactor the registrations so a dispatcher can be easily unregistered if/when it's connection is closed.
+
 	for _, rid := range td.Roads {
 		_, ok := s.dispatchers[rid]
 		if !ok {
-			s.dispatchers[rid] = make([]*TicketDispatcher, 0)
+			s.dispatchers[rid] = make(map[*TicketDispatcher]bool, 0)
 		}
-		s.dispatchers[rid] = append(s.dispatchers[rid], td)
+		s.dispatchers[rid][td] = true
 	}
 	return nil
+}
+
+func (s *Server) unregisterDispatcher(ctx context.Context, td *TicketDispatcher) {
+	if td == nil {
+		return
+	}
+	for _, rid := range td.Roads {
+		delete(s.dispatchers[rid], td)
+	}
 }
 
 func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
@@ -243,19 +251,16 @@ func (s *Server) ticketListen() {
 		ticket := <-s.ticketQueue
 		log.Printf("picked up ticket from queue: %+v\n", ticket)
 		ticket.Retry()
+
 		// Look up dispatcher for road
-		ds, ok := s.dispatchers[ticket.Road]
-		if !ok && ticket.Retries() < 5 {
-			log.Printf("no dispatchers available for road %d. Requeuing ticket..\n", ticket.Road)
+		td, err := s.nextDispatcher(ticket.Road)
+		if err != nil && ticket.Retries() < 5 {
+			log.Printf("%v.\n Requeuing ticket..\n", err)
 			// Put the ticket back in the queue
 			s.ticketQueue <- ticket
 			continue
 		}
-		if len(ds) == 0 {
-			continue
-		}
-		// pick random dispatcher
-		td := ds[rand.Intn(len(ds))]
+
 		// Send ticket
 		if err := td.send(ticket); err != nil {
 			// TODO: Try another dispatcher
@@ -263,6 +268,17 @@ func (s *Server) ticketListen() {
 			continue
 		}
 	}
+}
+
+func (s *Server) nextDispatcher(roadID uint16) (*TicketDispatcher, error) {
+	dispatchers, ok := s.dispatchers[roadID]
+	if !ok {
+		return nil, fmt.Errorf("no dispatchers available for road %d", roadID)
+	}
+	for dispatcher, _ := range dispatchers {
+		return dispatcher, nil
+	}
+	return nil, fmt.Errorf("no dispatchers available for road %d", roadID)
 }
 
 func (s *Server) startHeartbeat(msg []byte, conn net.Conn, ticker *time.Ticker) error {
