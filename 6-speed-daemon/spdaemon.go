@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"sync"
@@ -159,12 +160,12 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 		// Read the message
 		msgLen := msgType.Len(lenHdr)
 		msg := make([]byte, msgLen)
-		n, err := r.Read(msg)
+		n, err := io.ReadFull(r, msg)
 		if err != nil {
+			if err == io.ErrUnexpectedEOF {
+				log.Printf("[%s]** expected to read %d bytes, but only recv'd: %d\nmsg: %x", clientID, msgLen, n, msg)
+			}
 			return &ServerError{fmt.Sprintf("read: %v", err)}
-		}
-		if n < msgLen {
-			log.Printf("[%s]** expected to read %d bytes, but only recv'd: %d\nmsg: %x", clientID, msgLen, n, msg)
 		}
 
 		// Handle message
@@ -184,7 +185,7 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 			if heartbeatTicker != nil {
 				return &ClientError{"WantHeartbeat already sent"}
 			}
-			if err := s.startHeartbeat(msg, conn, heartbeatTicker); err != nil {
+			if err := s.startHeartbeat(ctx, msg, conn, heartbeatTicker); err != nil {
 				return fmt.Errorf("startHeartbeat: %w", err)
 			}
 		}
@@ -301,7 +302,7 @@ func (s *Server) nextDispatcher(roadID uint16) (*TicketDispatcher, error) {
 	return nil, fmt.Errorf("no dispatchers available for road %d", roadID)
 }
 
-func (s *Server) startHeartbeat(msg []byte, conn net.Conn, ticker *time.Ticker) error {
+func (s *Server) startHeartbeat(ctx context.Context, msg []byte, conn net.Conn, ticker *time.Ticker) error {
 	// in deciseconds
 	interval := binary.BigEndian.Uint32(msg[1:])
 	if interval < 1 {
@@ -311,13 +312,16 @@ func (s *Server) startHeartbeat(msg []byte, conn net.Conn, ticker *time.Ticker) 
 
 	go func() {
 		for {
-			<-ticker.C
-			hb := []byte{byte(message.TypeHeartbeat)}
-			if _, err := conn.Write(hb); err != nil {
-				log.Printf("write heartbeat err: %v\n", err)
+			select {
+			case <-ctx.Done():
 				ticker.Stop()
+			case <-ticker.C:
+				hb := []byte{byte(message.TypeHeartbeat)}
+				if _, err := conn.Write(hb); err != nil {
+					log.Printf("[%s]write heartbeat err: %v\n", ctx.Value(CONNECTION_ID), err)
+					ticker.Stop()
+				}
 			}
-			log.Println("tick")
 		}
 	}()
 	return nil

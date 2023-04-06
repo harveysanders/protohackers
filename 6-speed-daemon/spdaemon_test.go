@@ -88,7 +88,7 @@ func TestHeartbeat(t *testing.T) {
 }
 
 func TestServer(t *testing.T) {
-	port := "9999"
+	port := "45678"
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
