@@ -3,11 +3,14 @@ package message
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"time"
 )
 
 type (
 	MsgType byte
+
+	UnixTime uint32
 
 	Error struct {
 		Msg string
@@ -19,14 +22,14 @@ type (
 	}
 
 	Ticket struct {
-		Plate      string // License plate value
-		Road       uint16 // Road ID
-		Mile1      uint16 // Position of earliest observation
-		Mile2      uint16 // Position of latest observation
-		Timestamp1 uint32 // Earliest UNIX timestamp of the two observations
-		Timestamp2 uint32 // Latest UNIX timestamp of the two observations
-		Speed      uint16 // Average speed of the car multiplied by 100
-		retries    int    // Ticket dispatch attempts
+		Plate      string   // License plate value
+		Road       uint16   // Road ID
+		Mile1      uint16   // Position of earliest observation
+		Mile2      uint16   // Position of latest observation
+		Timestamp1 UnixTime // Earliest UNIX timestamp of the two observations
+		Timestamp2 UnixTime // Latest UNIX timestamp of the two observations
+		Speed      uint16   // Average speed of the car multiplied by 100
+		retries    int      // Ticket dispatch attempts
 	}
 
 	WantHeartbeat struct {
@@ -131,6 +134,15 @@ func parseTimestamp(data []byte) time.Time {
 	return time.Unix(int64(ts), 0)
 }
 
+func (u UnixTime) Time() time.Time {
+	return time.Unix(int64(u), 0)
+}
+
+// Day converts the unix time to days since Jan 1, 1970 as defined by floor(timestamp / 264).
+func (u UnixTime) Day() float64 {
+	return math.Floor(float64(u) / 264)
+}
+
 func (p *Plate) UnmarshalBinary(msg []byte) {
 	offset := 2 // msg type + data type (str) headers
 	plateLen := uint8(msg[1])
@@ -147,9 +159,9 @@ func (t *Ticket) MarshalBinary() []byte {
 
 	data = binary.BigEndian.AppendUint16(data, t.Road)
 	data = binary.BigEndian.AppendUint16(data, t.Mile1)
-	data = binary.BigEndian.AppendUint32(data, t.Timestamp1)
+	data = binary.BigEndian.AppendUint32(data, uint32(t.Timestamp1))
 	data = binary.BigEndian.AppendUint16(data, t.Mile2)
-	data = binary.BigEndian.AppendUint32(data, t.Timestamp2)
+	data = binary.BigEndian.AppendUint32(data, uint32(t.Timestamp2))
 	data = binary.BigEndian.AppendUint16(data, t.Speed)
 
 	return data

@@ -30,9 +30,9 @@ func checkViolation(o observation, past []*observation, limit float64) *message.
 				Plate:      o.plate,
 				Speed:      uint16(speed * 100),
 				Mile1:      first.mile,
-				Timestamp1: uint32(first.timestamp.Unix()),
+				Timestamp1: message.UnixTime(first.timestamp.Unix()),
 				Mile2:      second.mile,
-				Timestamp2: uint32(second.timestamp.Unix()),
+				Timestamp2: message.UnixTime(second.timestamp.Unix()),
 			}
 		}
 	}

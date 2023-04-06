@@ -21,6 +21,13 @@ type (
 		dispatchers map[uint16]map[*TicketDispatcher]bool // [road ID]:dispatcher
 		plates      map[uint16]map[string][]*observation  // [road ID][plate]
 		ticketQueue ticketQueue
+		ih          issueHistory
+	}
+
+	issueHistory interface {
+		add(t *message.Ticket)
+
+		lookupForDate(plate string, timestamp1, timestamp2 message.UnixTime) *message.Ticket
 	}
 
 	// Observation represents an event when a car's plate was captured on a certain road at a specific time and location.
@@ -48,6 +55,7 @@ func NewServer() *Server {
 		dispatchers: make(map[uint16]map[*TicketDispatcher]bool, 0),
 		plates:      make(map[uint16]map[string][]*observation, 0),
 		ticketQueue: make(ticketQueue, 2048),
+		ih:          newHistory(),
 	}
 }
 
@@ -254,10 +262,21 @@ func (s *Server) ticketListen() {
 
 		// Look up dispatcher for road
 		td, err := s.nextDispatcher(ticket.Road)
-		if err != nil && ticket.Retries() < 5 {
-			log.Printf("%v.\n Requeuing ticket..\n", err)
-			// Put the ticket back in the queue
-			s.ticketQueue <- ticket
+		if err != nil {
+			log.Printf("%v.\n", err)
+			if ticket.Retries() < 5 {
+				log.Print("%Requeuing ticket..\n")
+				// Put the ticket back in the queue
+				s.ticketQueue <- ticket
+			} else {
+				log.Printf("Retried to find dispatcher %d times. Dropping ticket...\n", ticket.Retries())
+			}
+			continue
+		}
+
+		// Double check ticket not already issued for same day
+		if issued := s.ih.lookupForDate(ticket.Plate, ticket.Timestamp1, ticket.Timestamp2); issued != nil {
+			// Don't requeue and move on to next
 			continue
 		}
 
@@ -267,6 +286,7 @@ func (s *Server) ticketListen() {
 			log.Printf("ticket dispatcher could not send ticket: %v\n", err)
 			continue
 		}
+		s.ih.add(ticket)
 	}
 }
 
