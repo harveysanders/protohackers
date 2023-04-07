@@ -172,16 +172,16 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 		switch msgType {
 		case message.TypeIAmCamera:
 			meCam.UnmarshalBinary(msg)
-			log.Printf("[%s]TypeIAmCamera: %+v\nraw: %x", clientID, meCam, msg)
+			// log.Printf("[%s]TypeIAmCamera: %+v\nraw: %x", clientID, meCam, msg)
 		case message.TypeIAmDispatcher:
 			dispatcher.conn = conn
 			s.registerDispatcher(ctx, msg, &dispatcher)
-			log.Printf("[%s]TypeIAmDispatcher: %+v\n%x", clientID, dispatcher, msg)
+			// log.Printf("[%s]TypeIAmDispatcher: %+v\n%x", clientID, dispatcher, msg)
 		case message.TypePlate:
-			log.Printf("[%s]TypePlate: %x", clientID, msg)
+			// log.Printf("[%s]TypePlate: %x", clientID, msg)
 			s.handlePlate(ctx, msg, meCam)
 		case message.TypeWantHeartbeat:
-			log.Printf("[%s]TypeWantHeartbeat: %x", clientID, msg)
+			// log.Printf("[%s]TypeWantHeartbeat: %x", clientID, msg)
 			if heartbeatTicker != nil {
 				return &ClientError{"WantHeartbeat already sent"}
 			}
@@ -268,7 +268,7 @@ func (s *Server) ticketListen(ctx context.Context) {
 			// Look up dispatcher for road
 			td, err := s.nextDispatcher(ticket.Road)
 			if err != nil {
-				log.Printf("%v.\n", err)
+				// log.Printf("%v.\n", err)
 				if ticket.Retries() < 50 {
 					// log.Print("%Requeuing ticket..\n")
 					// Put the ticket back in the queue
@@ -281,17 +281,20 @@ func (s *Server) ticketListen(ctx context.Context) {
 
 			// Double check ticket not already issued for same day
 			if issued := s.ih.lookupForDate(ticket.Plate, ticket.Timestamp1, ticket.Timestamp2); issued != nil {
+				log.Panicf("Ticket already issued: %+v", ticket)
 				// Don't requeue and move on to next
 				continue
 			}
 
 			// Send ticket
 			if err := td.send(ticket); err != nil {
-				// TODO: Try another dispatcher
-				log.Printf("ticket dispatcher could not send ticket: %v\n", err)
+				log.Printf("Ticket dispatcher could not send ticket: %v\n", err)
+				// Try again later
+				s.ticketQueue <- ticket
 				continue
 			}
 			s.ih.add(ticket)
+			log.Printf("Ticket issued: %v\n", ticket)
 		}
 	}
 }

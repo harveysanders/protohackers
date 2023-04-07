@@ -26,8 +26,9 @@ processes = []
   protocol = "tcp"
   script_checks = []
   [services.concurrency]
-    hard_limit = 250
-    soft_limit = 200
+    # Make sure you support at least 150 simultaneous clients.
+    hard_limit = 200
+    soft_limit = 150
     type = "connections"
 
   [[services.ports]]
