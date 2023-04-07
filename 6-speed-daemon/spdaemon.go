@@ -70,7 +70,7 @@ func (s *Server) Start(ctx context.Context, port string) error {
 
 	s.listener = l
 
-	go s.ticketListen()
+	go s.ticketListen(ctx)
 
 	clientID := 0
 	for {
@@ -252,42 +252,47 @@ func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
 	s.plates[cam.Road][p.Plate] = append(s.plates[cam.Road][p.Plate], &latest)
 }
 
-func (s *Server) ticketListen() {
+func (s *Server) ticketListen(ctx context.Context) {
 	for {
-		// Wait for dispatchers to come online
-		time.Sleep(time.Millisecond * 500)
-
-		ticket := <-s.ticketQueue
-		log.Printf("picked up ticket from queue: %+v\n", ticket)
-		ticket.Retry()
-
-		// Look up dispatcher for road
-		td, err := s.nextDispatcher(ticket.Road)
-		if err != nil {
-			log.Printf("%v.\n", err)
-			if ticket.Retries() < 5 {
-				log.Print("%Requeuing ticket..\n")
-				// Put the ticket back in the queue
-				s.ticketQueue <- ticket
-			} else {
-				log.Printf("Retried to find dispatcher %d times. Dropping ticket...\n", ticket.Retries())
+		select {
+		case <-ctx.Done():
+			log.Printf("context closed: %v\n", ctx.Err())
+			return
+		case ticket := <-s.ticketQueue:
+			time.Sleep(time.Millisecond)
+			if ticket.Retries() == 0 || ticket.Retries()%25 == 0 {
+				log.Printf("picked up ticket from queue: %+v\n", ticket)
 			}
-			continue
-		}
+			ticket.Retry()
 
-		// Double check ticket not already issued for same day
-		if issued := s.ih.lookupForDate(ticket.Plate, ticket.Timestamp1, ticket.Timestamp2); issued != nil {
-			// Don't requeue and move on to next
-			continue
-		}
+			// Look up dispatcher for road
+			td, err := s.nextDispatcher(ticket.Road)
+			if err != nil {
+				log.Printf("%v.\n", err)
+				if ticket.Retries() < 50 {
+					// log.Print("%Requeuing ticket..\n")
+					// Put the ticket back in the queue
+					s.ticketQueue <- ticket
+				} else {
+					log.Printf("Retried to find dispatcher %d times. Dropping ticket...\n", ticket.Retries())
+				}
+				continue
+			}
 
-		// Send ticket
-		if err := td.send(ticket); err != nil {
-			// TODO: Try another dispatcher
-			log.Printf("ticket dispatcher could not send ticket: %v\n", err)
-			continue
+			// Double check ticket not already issued for same day
+			if issued := s.ih.lookupForDate(ticket.Plate, ticket.Timestamp1, ticket.Timestamp2); issued != nil {
+				// Don't requeue and move on to next
+				continue
+			}
+
+			// Send ticket
+			if err := td.send(ticket); err != nil {
+				// TODO: Try another dispatcher
+				log.Printf("ticket dispatcher could not send ticket: %v\n", err)
+				continue
+			}
+			s.ih.add(ticket)
 		}
-		s.ih.add(ticket)
 	}
 }
 
