@@ -281,7 +281,7 @@ func (s *Server) ticketListen(ctx context.Context) {
 
 			// Double check ticket not already issued for same day
 			if issued := s.ih.lookupForDate(ticket.Plate, ticket.Timestamp1, ticket.Timestamp2); issued != nil {
-				log.Panicf("Ticket already issued: %+v", ticket)
+				log.Printf("Ticket already issued: %+v", ticket)
 				// Don't requeue and move on to next
 				continue
 			}
