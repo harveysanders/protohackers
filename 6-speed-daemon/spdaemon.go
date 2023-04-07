@@ -112,7 +112,9 @@ func (s *Server) HandleConnection(ctx context.Context, conn net.Conn) error {
 		case errors.As(err, &clientErr):
 			// TODO: Marshall message.Error and send back to client
 		default: // Server Error
-			log.Printf("[%s] addClient: %v", clientID, err)
+			if !errors.Is(err, io.EOF) {
+				log.Printf("[%s] addClient: %v", clientID, err)
+			}
 		}
 		return conn.Close()
 	}
@@ -244,6 +246,10 @@ func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
 	// If seen before
 	// iterate over the records and calculate the average speed
 	if v := checkViolation(latest, obs, float64(cam.Limit)); v != nil {
+		if issued := s.ih.lookupForDate(v.Plate, v.Timestamp1, v.Timestamp2); issued != nil {
+			log.Printf("Ticket already issued: %+v", v)
+			return
+		}
 		v.Road = cam.Road
 		log.Printf("violation: %+v", v)
 		s.ticketQueue <- v
@@ -304,7 +310,7 @@ func (s *Server) nextDispatcher(roadID uint16) (*TicketDispatcher, error) {
 	if !ok {
 		return nil, fmt.Errorf("no dispatchers available for road %d", roadID)
 	}
-	for dispatcher, _ := range dispatchers {
+	for dispatcher := range dispatchers {
 		return dispatcher, nil
 	}
 	return nil, fmt.Errorf("no dispatchers available for road %d", roadID)
