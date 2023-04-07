@@ -154,7 +154,7 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 		// The next 2 bytes contain enough info to calc the length of the complete message.
 		lenHdr, err := r.Peek(2)
 		if err != nil {
-			return &ServerError{fmt.Sprintf("length header peak: %v", err)}
+			return &ServerError{fmt.Sprintf("length header peek: %v", err)}
 		}
 
 		// Read the message
@@ -326,7 +326,6 @@ func (s *Server) startHeartbeat(ctx context.Context, msg []byte, conn net.Conn, 
 			case <-ticker.C:
 				hb := []byte{byte(message.TypeHeartbeat)}
 				if _, err := conn.Write(hb); err != nil {
-					log.Printf("[%s]write heartbeat err: %v\n", ctx.Value(CONNECTION_ID), err)
 					ticker.Stop()
 				}
 			}
