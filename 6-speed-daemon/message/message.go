@@ -138,9 +138,9 @@ func (u UnixTime) Time() time.Time {
 	return time.Unix(int64(u), 0)
 }
 
-// Day converts the unix time to days since Jan 1, 1970 as defined by floor(timestamp / 264).
+// Day converts the unix time to days since Jan 1, 1970 as defined by floor(timestamp / 86400).
 func (u UnixTime) Day() float64 {
-	return math.Floor(float64(u) / 264)
+	return math.Floor(float64(u) / 86400)
 }
 
 func (p *Plate) UnmarshalBinary(msg []byte) {
