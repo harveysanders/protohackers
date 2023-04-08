@@ -41,11 +41,11 @@ type (
 	ctxKey string
 
 	ServerError struct {
-		Msg string
+		Err error
 	}
 
 	ClientError struct {
-		Msg string
+		Err error
 	}
 )
 
@@ -139,7 +139,7 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 	for {
 		msgHdr, err := r.Peek(1)
 		if err != nil {
-			return &ServerError{fmt.Sprintf("msg header peek: %v", err)}
+			return &ServerError{fmt.Errorf("msg header peek: %w", err)}
 		}
 		// Read the first byte to get the message type
 		msgType, err := message.ParseType(msgHdr[0])
@@ -149,14 +149,14 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 				log.Printf("problem peek invalid message: %v", err)
 			}
 			log.Printf("invalid message type: %v\n%x", err, invalidMsg)
-			return &ClientError{fmt.Sprintf("invalid message type: %v", err)}
+			return &ClientError{fmt.Errorf("invalid message type: %w", err)}
 		}
 
 		// Calc the expected length of the message.
 		// The next 2 bytes contain enough info to calc the length of the complete message.
 		lenHdr, err := r.Peek(2)
 		if err != nil {
-			return &ServerError{fmt.Sprintf("length header peek: %v", err)}
+			return &ServerError{fmt.Errorf("length header peek: %w", err)}
 		}
 
 		// Read the message
@@ -167,7 +167,7 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 			if err == io.ErrUnexpectedEOF {
 				log.Printf("[%s]** expected to read %d bytes, but only recv'd: %d\nmsg: %x", clientID, msgLen, n, msg)
 			}
-			return &ServerError{fmt.Sprintf("read: %v", err)}
+			return &ServerError{fmt.Errorf("read: %w", err)}
 		}
 
 		// Handle message
@@ -185,7 +185,7 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 		case message.TypeWantHeartbeat:
 			// log.Printf("[%s]TypeWantHeartbeat: %x", clientID, msg)
 			if heartbeatTicker != nil {
-				return &ClientError{"WantHeartbeat already sent"}
+				return &ClientError{errors.New("wantHeartbeat already sent")}
 			}
 			if err := s.startHeartbeat(ctx, msg, conn, heartbeatTicker); err != nil {
 				return fmt.Errorf("startHeartbeat: %w", err)
@@ -341,9 +341,9 @@ func (s *Server) startHeartbeat(ctx context.Context, msg []byte, conn net.Conn, 
 }
 
 func (e *ServerError) Error() string {
-	return e.Msg
+	return e.Err.Error()
 }
 
 func (e *ClientError) Error() string {
-	return e.Msg
+	return e.Err.Error()
 }
