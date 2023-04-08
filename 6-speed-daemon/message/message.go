@@ -167,8 +167,8 @@ func (t *Ticket) MarshalBinary() []byte {
 	return data
 }
 
-// Retry increments the ticket's retry counter.
-func (t *Ticket) Retry() {
+// IncAttempts increments the ticket's retry counter.
+func (t *Ticket) IncAttempts() {
 	t.retries++
 }
 

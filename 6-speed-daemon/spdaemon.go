@@ -53,7 +53,7 @@ func NewServer() *Server {
 	return &Server{
 		dispatchers: make(map[uint16]map[*TicketDispatcher]bool, 0),
 		plates:      make(map[uint16]map[string][]*observation, 0),
-		ticketQueue: make(ticketQueue, 2048),
+		ticketQueue: make(ticketQueue, 8192),
 		ih:          newHistory(),
 	}
 }
@@ -111,7 +111,7 @@ func (s *Server) HandleConnection(ctx context.Context, conn net.Conn) error {
 			// TODO: Marshall message.Error and send back to client
 		default: // Server Error
 			if !errors.Is(err, io.EOF) {
-				log.Printf("[%s] addClient: %v", clientID, err)
+				log.Printf("[%s] Conn ERR: %v", clientID, err)
 			}
 		}
 		return conn.Close()
@@ -134,6 +134,7 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 	}()
 
 	r := bufio.NewReader(conn)
+
 	for {
 		msgHdr, err := r.Peek(1)
 		if err != nil {
@@ -221,7 +222,7 @@ func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
 	p.UnmarshalBinary(msg)
 
 	clientID := ctx.Value(CONNECTION_ID)
-	log.Printf("[%s]Plate: %+v", clientID, p)
+	log.Printf("[%s] Plate: %+v", clientID, p)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -244,14 +245,9 @@ func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
 	// If seen before
 	// iterate over the records and calculate the average speed
 	if v := checkViolation(latest, obs, float64(cam.Limit)); v != nil {
-		if issued := s.ih.lookupForDate(v.Plate, v.Timestamp1, v.Timestamp2); issued != nil {
-			log.Printf("Ticket already issued: %+v", v)
-			return
-		}
 		v.Road = cam.Road
 		log.Print("____________________")
 		log.Printf("violation: %+v", v)
-		log.Printf("violation: day1: %.0f, day2: %.0f", v.Timestamp1.Day(), v.Timestamp2.Day())
 		log.Print("____________________")
 		s.ticketQueue <- v
 	}
@@ -267,10 +263,8 @@ func (s *Server) ticketListen(ctx context.Context) {
 			return
 		case ticket := <-s.ticketQueue:
 			time.Sleep(time.Millisecond)
-			if ticket.Retries() == 0 || ticket.Retries()%25 == 0 {
-				log.Printf("picked up ticket from queue: %+v\n", ticket)
-			}
-			ticket.Retry()
+
+			ticket.IncAttempts()
 
 			// Look up dispatcher for road
 			td, err := s.nextDispatcher(ticket.Road)
@@ -294,7 +288,6 @@ func (s *Server) ticketListen(ctx context.Context) {
 			}
 
 			// Send ticket
-			log.Printf("ticket history:\n%+v", s.ih.printHistory(ticket.Plate))
 			if err := td.send(ticket); err != nil {
 				log.Printf("Ticket dispatcher could not send ticket: %v\n", err)
 				// Try again later
@@ -302,7 +295,8 @@ func (s *Server) ticketListen(ctx context.Context) {
 				continue
 			}
 			s.ih.add(ticket)
-			log.Printf("Ticket issued: %v\n", ticket)
+			log.Printf("Ticket issued: %+v\n", ticket)
+			log.Printf("%d left in queue.\n", len(s.ticketQueue))
 		}
 	}
 }
