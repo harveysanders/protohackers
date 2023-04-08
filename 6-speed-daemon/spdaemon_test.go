@@ -219,4 +219,101 @@ func TestServer(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("[Recreated Scenario] does not issue multiple tickets for the same day", func(t *testing.T) {
+		// wait for server to start
+		time.Sleep(time.Second / 2)
+		clients := []struct {
+			name      string
+			messages  [][]byte
+			responses [][]byte
+		}{
+			// 			2023/04/08 14:13:23 ticket history:
+			// ** [MP68GVG] START **
+			// [info]Day: 231080.000000: &{Plate:MP68GVG Road:19840 Mile1:596 Mile2:1 Timestamp1:61005287 Timestamp2:61034167 Speed:7416 retries:1}
+			// [info]Day: 231190.000000: &{Plate:MP68GVG Road:19840 Mile1:596 Mile2:1 Timestamp1:61005287 Timestamp2:61034167 Speed:7416 retries:1}
+			// ** [MP68GVG] END **
+			// 2023/04/08 14:13:23 Ticket issued: &{MP68GVG 19840 542 346 61014691 61021747 10000 1}
+			{
+				name: "Cam_Rd19840_Mi01",
+				messages: [][]byte{
+					{0x80, 0x4D, 0x80, 0x00, 0x01, 0x00, 0x50},
+					// {plate: "MP68GVG", timestamp: 61034167}
+					{0x20,
+						0x07, 0x4D, 0x50, 0x36, 0x38, 0x47, 0x56, 0x47,
+						0x03, 0xA3, 0x4E, 0xB7,
+					},
+				},
+			},
+			{
+				name: "Cam_Rd19840_Mi596",
+				messages: [][]byte{
+					{0x80, 0x4D, 0x80, 0x02, 0x54, 0x00, 0x50},
+					// {plate: "MP68GVG", timestamp: 61005287}
+					{0x20,
+						0x07, 0x4D, 0x50, 0x36, 0x38, 0x47, 0x56, 0x47,
+						0x03, 0xA2, 0xDD, 0xE7,
+					},
+				},
+			},
+			{
+				name: "Cam_Rd19840_Mi542",
+				messages: [][]byte{
+					{0x80, 0x4D, 0x80, 0x02, 0x1E, 0x00, 0x50},
+					// {plate: "MP68GVG", timestamp: 61014691}
+					{0x20,
+						0x07, 0x4D, 0x50, 0x36, 0x38, 0x47, 0x56, 0x47,
+						0x03, 0xA3, 0x02, 0xA3,
+					},
+				},
+			},
+			{
+				name: "Cam_Rd19840_Mi346",
+				messages: [][]byte{
+					{0x80, 0x4D, 0x80, 0x01, 0x5A, 0x00, 0x50},
+					// {plate: "MP68GVG", timestamp: 61021747}
+					{0x20,
+						0x07, 0x4D, 0x50, 0x36, 0x38, 0x47, 0x56, 0x47,
+						0x03, 0xA3, 0x1E, 0x33,
+					},
+				},
+			},
+			{
+				name: "dispatcher",
+				messages: [][]byte{
+					//  IAmDispatcher{roads: [347, 19840]}
+					{0x81, 0x02, 0x01, 0x5b, 0x4D, 0x80},
+				},
+			},
+		}
+
+		for _, client := range clients {
+			conn, err := net.Dial("tcp", addr)
+			require.NoError(t, err)
+
+			for _, msg := range client.messages {
+				n, err := conn.Write(msg)
+				require.NoError(t, err)
+				require.Greater(t, n, 0)
+			}
+
+			if client.name == "dispatcher" {
+				err := conn.SetReadDeadline(time.Now().Add(time.Second * 2))
+				require.NoError(t, err)
+				rawTickets := make([]byte, 0)
+
+				for {
+					ticketMsg := make([]byte, 25)
+					n, err := conn.Read(ticketMsg)
+					if errors.Is(err, os.ErrDeadlineExceeded) || len(rawTickets) > 25 {
+						break
+					}
+					require.NoError(t, err)
+					rawTickets = append(rawTickets, ticketMsg[:n]...)
+				}
+
+				require.Len(t, rawTickets, 25, "should only issue one ticket for the same day. (Each ticket is 25 bytes)")
+			}
+		}
+	})
 }

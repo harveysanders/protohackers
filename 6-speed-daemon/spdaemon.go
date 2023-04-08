@@ -29,6 +29,8 @@ type (
 		add(t *message.Ticket)
 
 		lookupForDate(plate string, timestamp1, timestamp2 message.UnixTime) *message.Ticket
+
+		printHistory(plate string) string
 	}
 
 	// Observation represents an event when a car's plate was captured on a certain road at a specific time and location.
@@ -39,10 +41,6 @@ type (
 	}
 
 	ctxKey string
-
-	ServerError struct {
-		Err error
-	}
 
 	ClientError struct {
 		Err error
@@ -139,7 +137,7 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 	for {
 		msgHdr, err := r.Peek(1)
 		if err != nil {
-			return &ServerError{fmt.Errorf("msg header peek: %w", err)}
+			return fmt.Errorf("msg header peek: %w", err)
 		}
 		// Read the first byte to get the message type
 		msgType, err := message.ParseType(msgHdr[0])
@@ -156,7 +154,7 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 		// The next 2 bytes contain enough info to calc the length of the complete message.
 		lenHdr, err := r.Peek(2)
 		if err != nil {
-			return &ServerError{fmt.Errorf("length header peek: %w", err)}
+			return fmt.Errorf("length header peek: %w", err)
 		}
 
 		// Read the message
@@ -167,7 +165,7 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 			if err == io.ErrUnexpectedEOF {
 				log.Printf("[%s]** expected to read %d bytes, but only recv'd: %d\nmsg: %x", clientID, msgLen, n, msg)
 			}
-			return &ServerError{fmt.Errorf("read: %w", err)}
+			return fmt.Errorf("read: %w", err)
 		}
 
 		// Handle message
@@ -251,7 +249,10 @@ func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
 			return
 		}
 		v.Road = cam.Road
+		log.Print("____________________")
 		log.Printf("violation: %+v", v)
+		log.Printf("violation: day1: %.0f, day2: %.0f", v.Timestamp1.Day(), v.Timestamp2.Day())
+		log.Print("____________________")
 		s.ticketQueue <- v
 	}
 	// Add observation
@@ -293,6 +294,7 @@ func (s *Server) ticketListen(ctx context.Context) {
 			}
 
 			// Send ticket
+			log.Printf("ticket history:\n%+v", s.ih.printHistory(ticket.Plate))
 			if err := td.send(ticket); err != nil {
 				log.Printf("Ticket dispatcher could not send ticket: %v\n", err)
 				// Try again later
@@ -338,10 +340,6 @@ func (s *Server) startHeartbeat(ctx context.Context, msg []byte, conn net.Conn, 
 		}
 	}()
 	return nil
-}
-
-func (e *ServerError) Error() string {
-	return e.Err.Error()
 }
 
 func (e *ClientError) Error() string {

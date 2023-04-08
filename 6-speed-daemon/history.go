@@ -1,6 +1,8 @@
 package spdaemon
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/harveysanders/protohackers/spdaemon/message"
@@ -54,4 +56,21 @@ func (h *history) lookupForDate(plate string, timestamp1, timestamp2 message.Uni
 		}
 	}
 	return nil
+}
+
+func (h *history) printHistory(plate string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	tickets, ok := h.issued[plate]
+	if !ok {
+		return fmt.Sprintf("[%s]: No tickets yet\n", plate)
+	}
+	var out strings.Builder
+	out.WriteString(fmt.Sprintf("** [%s] START **\n", plate))
+	for day, t := range tickets {
+		out.WriteString(fmt.Sprintf("Day: %f: %+v\n", day, t))
+	}
+	out.WriteString(fmt.Sprintf("** [%s] END **\n", plate))
+	return out.String()
 }
