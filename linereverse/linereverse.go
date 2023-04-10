@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"log"
 
 	"github.com/harveysanders/protohackers/linereverse/lrcp"
@@ -17,8 +16,8 @@ func New() *App {
 	return &App{}
 }
 
-func (a *App) Run(port string) error {
-	l, err := lrcp.Listen(port)
+func (a *App) Run(address string) error {
+	l, err := lrcp.Listen(address)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
@@ -28,7 +27,7 @@ func (a *App) Run(port string) error {
 			return fmt.Errorf("accept: %w", err)
 		}
 		go func(c *lrcp.StableConn) {
-			err := reverseLines(c, c)
+			err := reverseLines(c)
 			if err != nil {
 				log.Printf("reverseLines: %v", err)
 			}
@@ -37,8 +36,8 @@ func (a *App) Run(port string) error {
 }
 
 // RevereLines reads lines from r, reverses the contents and writes the result to w.
-func reverseLines(w io.Writer, r io.Reader) error {
-	scr := bufio.NewScanner(r)
+func reverseLines(c *lrcp.StableConn) error {
+	scr := bufio.NewScanner(c)
 	scr.Split(bufio.ScanLines)
 
 	for scr.Scan() {
@@ -49,7 +48,7 @@ func reverseLines(w io.Writer, r io.Reader) error {
 		if err != nil {
 			return err
 		}
-		_, err = w.Write(append(line, '\n'))
+		_, err = c.Write(append(line, '\n'))
 		if err != nil {
 			return err
 		}
