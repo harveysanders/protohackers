@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,22 @@ type (
 		plates      map[uint16]map[string][]*observation  // [road ID][plate]
 		ticketQueue ticketQueue
 		ih          issueHistory
+		metrics     metrics
+	}
+
+	metrics struct {
+		Plates struct {
+			Total  int
+			Unique int
+		}
+		Tickets struct {
+			Issued   int
+			Queued   int
+			Failed   int
+			Attempts int
+			Requeued int
+			Dropped  int
+		}
 	}
 
 	issueHistory interface {
@@ -151,6 +168,16 @@ func (s *Server) addClient(ctx context.Context, conn net.Conn) error {
 			return &ClientError{fmt.Errorf("invalid message type: %w", err)}
 		}
 
+		if msgType == message.TypeWantMetrics {
+			if err := json.NewEncoder(conn).Encode(s.metrics); err != nil {
+				return fmt.Errorf("error sending metrics response: %w", err)
+			}
+			if _, err := r.Discard(r.Buffered()); err != nil {
+				return fmt.Errorf("discard: %w", err)
+			}
+			continue
+		}
+
 		// Calc the expected length of the message.
 		// The next 2 bytes contain enough info to calc the length of the complete message.
 		lenHdr, err := r.Peek(2)
@@ -230,6 +257,8 @@ func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
 		s.plates[cam.Road] = make(map[string][]*observation)
 	}
 
+	s.metrics.Plates.Total++
+
 	// Check if plate has been seen on the same road before
 	obs, ok := s.plates[cam.Road][p.Plate]
 	latest := observation{
@@ -240,6 +269,7 @@ func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
 	if !ok {
 		// If not, register the plate
 		s.plates[cam.Road][p.Plate] = []*observation{&latest}
+		s.metrics.Plates.Unique++
 		return
 	}
 	// If seen before
@@ -249,6 +279,7 @@ func (s *Server) handlePlate(ctx context.Context, msg []byte, cam Camera) {
 		log.Print("____________________")
 		log.Printf("violation: %+v", v)
 		log.Print("____________________")
+		s.metrics.Tickets.Queued++
 		s.ticketQueue <- v
 	}
 	// Add observation
@@ -266,6 +297,8 @@ func (s *Server) ticketListen(ctx context.Context) {
 
 			ticket.IncAttempts()
 
+			s.metrics.Tickets.Attempts++
+
 			// Look up dispatcher for road
 			td, err := s.nextDispatcher(ticket.Road)
 			if err != nil {
@@ -273,8 +306,10 @@ func (s *Server) ticketListen(ctx context.Context) {
 				if ticket.Retries() < 50 {
 					// log.Print("%Requeuing ticket..\n")
 					// Put the ticket back in the queue
+					s.metrics.Tickets.Requeued++
 					s.ticketQueue <- ticket
 				} else {
+					s.metrics.Tickets.Dropped++
 					log.Printf("Retried to find dispatcher %d times. Dropping ticket...\n", ticket.Retries())
 				}
 				continue
@@ -283,17 +318,20 @@ func (s *Server) ticketListen(ctx context.Context) {
 			// Double check ticket not already issued for same day
 			if issued := s.ih.lookupForDate(ticket.Plate, ticket.Timestamp1, ticket.Timestamp2); issued != nil {
 				log.Printf("Ticket already issued: %+v", ticket)
+				s.metrics.Tickets.Dropped++
 				// Don't requeue and move on to next
 				continue
 			}
 
 			// Send ticket
 			if err := td.send(ticket); err != nil {
+				s.metrics.Tickets.Failed++
 				log.Printf("Ticket dispatcher could not send ticket: %v\n", err)
 				// Try again later
 				s.ticketQueue <- ticket
 				continue
 			}
+			s.metrics.Tickets.Issued++
 			s.ih.add(ticket)
 			log.Printf("Ticket issued: %+v\n", ticket)
 			log.Printf("%d left in queue.\n", len(s.ticketQueue))

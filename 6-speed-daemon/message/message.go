@@ -58,6 +58,7 @@ const (
 	TypeHeartbeat     MsgType = 0x41 // (Server->Client)
 	TypeIAmCamera     MsgType = 0x80 // (Client->Server)
 	TypeIAmDispatcher MsgType = 0x81 // (Client->Server)
+	TypeWantMetrics   MsgType = 0x6D // "m"
 )
 
 // Len returns the expected length of the message of the given type. This includes 1 byte for the message type uint8 itself.
@@ -122,6 +123,8 @@ func ParseType(raw byte) (MsgType, error) {
 		return TypeIAmCamera, nil
 	case byte(TypeIAmDispatcher):
 		return TypeIAmDispatcher, nil
+	case byte(TypeWantMetrics):
+		return TypeWantMetrics, nil
 	default:
 		return TypeError, fmt.Errorf("invalid message type: %x", raw)
 	}

@@ -317,3 +317,9 @@ func TestServer(t *testing.T) {
 		}
 	})
 }
+
+func TestMetrics(t *testing.T) {
+	t.Run("sends back JSON metrics", func(t *testing.T) {
+		net.Dial("tcp6", "[2a09:8280:1::f:5ec]:8080")
+	})
+}
