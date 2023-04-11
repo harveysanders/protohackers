@@ -27,11 +27,7 @@ type (
 		retransmissionTimeout time.Duration
 		localAddr             net.Addr
 		udpConn               *net.UDPConn
-	}
-
-	StableConn struct {
-		udpConn *net.UDPConn
-		session session
+		msgLengths            map[string]int
 	}
 
 	session struct {
@@ -59,6 +55,12 @@ func Listen(address string) (*Listener, error) {
 		sessionExpiryTimeout:  time.Second * 60,
 		localAddr:             conn.LocalAddr(),
 		udpConn:               conn,
+		msgLengths: map[string]int{
+			string(MsgConnect): 2, // /connect/SESSION/
+			string(MsgData):    4, // /data/SESSION/POS/DATA/
+			string(MsgAck):     3, // /ack/SESSION/LENGTH/
+			string(MsgClose):   2, // /close/SESSION/
+		},
 	}, nil
 }
 
@@ -82,14 +84,12 @@ func (l *Listener) handleConn(c *net.UDPConn) error {
 	if firstByte[0] != '/' {
 		return fmt.Errorf("expected \"/\", but got: %q at pos 0", firstByte[0])
 	}
-	sess := session{
-		remoteAddr: rAddr,
-	}
-	log.Println(sess)
 
 	if err := c.SetReadDeadline(time.Now().Add(l.sessionExpiryTimeout)); err != nil {
 		return fmt.Errorf("setReadDeadline: %w", err)
 	}
+
+	sc := newStableConn(c, rAddr)
 
 	scr := bufio.NewScanner(c)
 	scr.Split(ScanLRCPSection)
@@ -101,19 +101,32 @@ func (l *Listener) handleConn(c *net.UDPConn) error {
 			return fmt.Errorf("scan: %w", err)
 		}
 		part := scr.Text()
+		if part == "" {
+			continue
+		}
+
 		msgParts = append(msgParts, part)
 		log.Printf("msgParts: %+v", msgParts)
+
+		// parse messages
+		if len(msgParts) > 1 {
+			msgType := msgParts[0]
+			switch msgType {
+			case MsgConnect:
+				if len(msgParts) == l.msgLengths[MsgConnect] {
+					sc.session.id = &msgParts[1]
+					// Reset msg buffer
+					msgParts = []string{}
+					// Send ack
+					if err := sc.sendAck(0); err != nil {
+						return fmt.Errorf("send connect ack: %w", err)
+					}
+				}
+			}
+		}
 	}
 
 	return nil
-}
-
-func (sc *StableConn) Read(data []byte) (int, error) {
-	return sc.session.buf.Read(data)
-}
-
-func (sc *StableConn) Write(data []byte) (int, error) {
-	return sc.udpConn.Write(data)
 }
 
 // ScanLRCPSection scans each section of an LRCP message, using "/" as the section delimiter. (Used bufio.ScanLines as example.)
