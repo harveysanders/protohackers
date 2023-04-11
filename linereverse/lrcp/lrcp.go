@@ -4,8 +4,10 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"strconv"
 	"time"
 )
 
@@ -28,13 +30,6 @@ type (
 		localAddr             net.Addr
 		udpConn               *net.UDPConn
 		msgLengths            map[string]int
-	}
-
-	session struct {
-		id         *string
-		buf        bytes.Buffer
-		pos        int // Current position in the overall stream of bytes.
-		remoteAddr *net.UDPAddr
 	}
 
 	sectionPos int
@@ -114,6 +109,7 @@ func (l *Listener) handleConn(c *net.UDPConn) error {
 			switch msgType {
 			case MsgConnect:
 				if len(msgParts) == l.msgLengths[MsgConnect] {
+					// /connect/SESSION/
 					sc.session.id = &msgParts[1]
 					// Reset msg buffer
 					msgParts = []string{}
@@ -121,6 +117,74 @@ func (l *Listener) handleConn(c *net.UDPConn) error {
 					if err := sc.sendAck(0); err != nil {
 						return fmt.Errorf("send connect ack: %w", err)
 					}
+				}
+
+			case MsgData:
+				if len(msgParts) == l.msgLengths[MsgData] {
+					log.Printf("%s: %+v", MsgData, msgParts)
+					// /data/SESSION/POS/DATA/
+					sessionID := msgParts[1]
+					pos, err := strconv.Atoi(msgParts[2])
+					if err != nil {
+						return fmt.Errorf("parse data position: %w", err)
+					}
+					data := msgParts[3]
+					// reset msgParts
+					msgParts = []string{}
+
+					log.Printf("sessionID: %s, pos: %d, data: %s", sessionID, pos, data)
+					// If the session is not open: send /close/SESSION/ and stop.
+					if sc.session.id == nil {
+						sc.sendClose()
+						return ErrSessionNotOpen
+					}
+					if sessionID != *sc.session.id {
+						return fmt.Errorf("expected ID: %q, but got %q", *sc.session.id, sessionID)
+					}
+
+					// Check if recv everything so far
+					if pos > sc.BytesRecvd() {
+						// missing data. send prev ack
+						if err := sc.sendAck(sc.BytesRecvd()); err != nil {
+							log.Printf("sendAck: %v", err)
+						}
+						continue
+					}
+					if pos == sc.BytesRecvd() {
+						// Write data to buffer at pos
+						if _, err := sc.session.recvBuf.Write(unescapeSlashes([]byte(data))); err != nil {
+							return fmt.Errorf("recvBuf.Write: %w", err)
+						}
+						if err := sc.sendAck(sc.BytesRecvd()); err != nil {
+							log.Printf("sendAck: %v", err)
+						}
+						continue
+					}
+					// we already have more bytes than pos. Most likely a problem? Start over?
+					log.Printf("POS: %d, BYTES RECV: %d", pos, sc.BytesRecvd())
+					if err := sc.sendAck(sc.BytesRecvd()); err != nil {
+						log.Printf("sendAck: %v", err)
+					}
+					sendRdr := bufio.NewReader(&sc.session.sendBuf)
+					sendData, err := sendRdr.ReadBytes('\n')
+					if err != nil {
+						if err == io.EOF {
+							continue
+						}
+						return fmt.Errorf("sendRdr.ReadBytes: %w", err)
+					}
+					sc.sendData(sendData, sc.session.bytesSent)
+					continue
+				}
+			case MsgAck:
+				if len(msgParts) == l.msgLengths[MsgAck] {
+					// /ack/SESSION/LENGTH/
+					log.Printf("%s: %+v", MsgAck, msgParts)
+				}
+			case MsgClose:
+				if len(msgParts) == l.msgLengths[MsgClose] {
+					// /close/SESSION/
+					log.Printf("%s: %+v", MsgClose, msgParts)
 				}
 			}
 		}
@@ -145,4 +209,14 @@ func ScanLRCPSection(data []byte, atEOF bool) (advance int, token []byte, err er
 	}
 	// Request more data.
 	return 0, nil, nil
+}
+
+func unescapeSlashes(data []byte) []byte {
+	out := bytes.ReplaceAll(data, []byte(`\/`), []byte(`/`))
+	return bytes.ReplaceAll(out, []byte(`\\`), []byte(`\`))
+}
+
+func escapeSlashes(data []byte) []byte {
+	out := bytes.ReplaceAll(data, []byte(`/`), []byte(`\/`))
+	return bytes.ReplaceAll(out, []byte(`\`), []byte(`\\`))
 }
