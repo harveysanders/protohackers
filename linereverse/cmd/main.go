@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -23,7 +24,7 @@ func main() {
 	log.Printf("serving starting @: %s", address)
 
 	app := linereverse.New()
-	if err := app.Run(address); err != nil {
+	if err := app.Run(context.TODO(), address); err != nil {
 		log.Fatal(err)
 	}
 }

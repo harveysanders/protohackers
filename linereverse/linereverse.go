@@ -3,6 +3,7 @@ package linereverse
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 
@@ -16,22 +17,28 @@ func New() *App {
 	return &App{}
 }
 
-func (a *App) Run(address string) error {
+func (a *App) Run(ctx context.Context, address string) error {
 	l, err := lrcp.Listen(address)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
+
 	for {
-		conn, err := l.Accept()
-		if err != nil {
-			return fmt.Errorf("accept: %w", err)
-		}
-		go func(c *lrcp.StableConn) {
-			err := reverseLines(c)
+		select {
+		case <-ctx.Done():
+			return l.Close()
+		default:
+			conn, err := l.Accept()
 			if err != nil {
-				log.Printf("reverseLines: %v", err)
+				log.Printf("accept: %v", err)
 			}
-		}(conn)
+			go func(c *lrcp.StableConn) {
+				err := reverseLines(c)
+				if err != nil {
+					log.Printf("reverseLines: %v", err)
+				}
+			}(conn)
+		}
 	}
 }
 

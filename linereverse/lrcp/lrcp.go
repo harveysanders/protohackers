@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -25,11 +26,15 @@ const (
 
 type (
 	Listener struct {
+		bufSize               int
 		sessionExpiryTimeout  time.Duration
 		retransmissionTimeout time.Duration
 		localAddr             net.Addr
 		udpConn               *net.UDPConn
 		msgLengths            map[string]int
+
+		mu       sync.Mutex
+		sessions map[string]*StableConn
 	}
 
 	sectionPos int
@@ -46,6 +51,7 @@ func Listen(address string) (*Listener, error) {
 		return nil, fmt.Errorf("listenUDP: %w", err)
 	}
 	return &Listener{
+		bufSize:               1024,
 		retransmissionTimeout: time.Second * 3,
 		sessionExpiryTimeout:  time.Second * 60,
 		localAddr:             conn.LocalAddr(),
@@ -56,44 +62,44 @@ func Listen(address string) (*Listener, error) {
 			string(MsgAck):     3, // /ack/SESSION/LENGTH/
 			string(MsgClose):   2, // /close/SESSION/
 		},
+		sessions: map[string]*StableConn{},
 	}, nil
 }
 
-func (l *Listener) Accept() (*StableConn, error) {
-	if err := l.handleConn(l.udpConn); err != nil {
-		return nil, fmt.Errorf("handleConn: %w", err)
-	}
-
-	return &StableConn{}, nil
+func (l *Listener) Close() error {
+	return l.udpConn.Close()
 }
 
-func (l *Listener) handleConn(c *net.UDPConn) error {
-	firstByte := make([]byte, 1)
-	n, rAddr, err := c.ReadFromUDP(firstByte)
-	if err != nil {
-		return fmt.Errorf("readFromUDP: %w", err)
+func (l *Listener) Accept() (*StableConn, error) {
+	buffer := make([]byte, l.bufSize)
+	for {
+		if err := l.udpConn.SetReadDeadline(time.Now().Add(l.sessionExpiryTimeout)); err != nil {
+			return nil, fmt.Errorf("setReadDeadline: %w", err)
+		}
+		n, rAddr, err := l.udpConn.ReadFromUDP(buffer)
+		if err != nil {
+			// Keep reading even if there is an error on a specific read.
+			log.Printf("readFrom: %v", err)
+			continue
+		}
+		log.Printf("read %d bytes..", n)
+		if n == 0 {
+			continue
+		}
+		go l.handleConn(buffer[0:n], rAddr)
 	}
+}
 
-	log.Printf("read %d bytes..", n)
-
-	if firstByte[0] != '/' {
-		return fmt.Errorf("expected \"/\", but got: %q at pos 0", firstByte[0])
-	}
-
-	if err := c.SetReadDeadline(time.Now().Add(l.sessionExpiryTimeout)); err != nil {
-		return fmt.Errorf("setReadDeadline: %w", err)
-	}
-
-	sc := newStableConn(c, rAddr)
-
-	scr := bufio.NewScanner(c)
+func (l *Listener) handleConn(data []byte, remoteAddr net.Addr) error {
+	scr := bufio.NewScanner(bytes.NewBuffer(data))
 	scr.Split(ScanLRCPSection)
 
+	var sc *StableConn
 	msgParts := []string{}
 
 	for scr.Scan() {
 		if scr.Err() != nil {
-			return fmt.Errorf("scan: %w", err)
+			return fmt.Errorf("scan: %w", scr.Err())
 		}
 		part := scr.Text()
 		if part == "" {
@@ -101,7 +107,6 @@ func (l *Listener) handleConn(c *net.UDPConn) error {
 		}
 
 		msgParts = append(msgParts, part)
-		log.Printf("msgParts: %+v", msgParts)
 
 		// parse messages
 		if len(msgParts) > 1 {
@@ -110,7 +115,17 @@ func (l *Listener) handleConn(c *net.UDPConn) error {
 			case MsgConnect:
 				if len(msgParts) == l.msgLengths[MsgConnect] {
 					// /connect/SESSION/
-					sc.session.id = &msgParts[1]
+					sessionID := msgParts[1]
+					l.mu.Lock()
+					if _, ok := l.sessions[sessionID]; !ok {
+						l.sessions[sessionID] = &StableConn{
+							sessionID:  &sessionID,
+							remoteAddr: remoteAddr,
+							udpConn:    *l.udpConn,
+						}
+					}
+					sc = l.sessions[sessionID]
+
 					// Reset msg buffer
 					msgParts = []string{}
 					// Send ack
@@ -134,12 +149,12 @@ func (l *Listener) handleConn(c *net.UDPConn) error {
 
 					log.Printf("sessionID: %s, pos: %d, data: %s", sessionID, pos, data)
 					// If the session is not open: send /close/SESSION/ and stop.
-					if sc.session.id == nil {
+					if sc.sessionID == nil {
 						sc.sendClose()
 						return ErrSessionNotOpen
 					}
-					if sessionID != *sc.session.id {
-						return fmt.Errorf("expected ID: %q, but got %q", *sc.session.id, sessionID)
+					if sessionID != *sc.sessionID {
+						return fmt.Errorf("expected ID: %q, but got %q", *sc.sessionID, sessionID)
 					}
 
 					// Check if recv everything so far
@@ -152,7 +167,7 @@ func (l *Listener) handleConn(c *net.UDPConn) error {
 					}
 					if pos == sc.BytesRecvd() {
 						// Write data to buffer at pos
-						if _, err := sc.session.recvBuf.Write(unescapeSlashes([]byte(data))); err != nil {
+						if _, err := sc.recvBuf.Write(unescapeSlashes([]byte(data))); err != nil {
 							return fmt.Errorf("recvBuf.Write: %w", err)
 						}
 						if err := sc.sendAck(sc.BytesRecvd()); err != nil {
@@ -165,7 +180,7 @@ func (l *Listener) handleConn(c *net.UDPConn) error {
 					if err := sc.sendAck(sc.BytesRecvd()); err != nil {
 						log.Printf("sendAck: %v", err)
 					}
-					sendRdr := bufio.NewReader(&sc.session.sendBuf)
+					sendRdr := bufio.NewReader(&sc.sendBuf)
 					sendData, err := sendRdr.ReadBytes('\n')
 					if err != nil {
 						if err == io.EOF {
@@ -173,7 +188,7 @@ func (l *Listener) handleConn(c *net.UDPConn) error {
 						}
 						return fmt.Errorf("sendRdr.ReadBytes: %w", err)
 					}
-					sc.sendData(sendData, sc.session.bytesSent)
+					sc.sendData(sendData, sc.bytesSent)
 					continue
 				}
 			case MsgAck:
