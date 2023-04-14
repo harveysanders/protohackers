@@ -26,16 +26,16 @@ func TestServer(t *testing.T) {
 		time.Sleep(time.Second / 2)
 
 		sessionID := 123456789
-		var outBuff bytes.Buffer
-
-		fmt.Fprintf(&outBuff, "/connect/%d/", sessionID)
-		// First message is thrown away for some reason?s
-		fmt.Fprintf(&outBuff, "/connect/%d/", sessionID)
-
+		var outBuf bytes.Buffer
+		var inBuf bytes.Buffer
 		ctx, cancel := context.WithCancel(context.Background())
-
-		client(ctx, serverAddress, &outBuff)
 		defer cancel()
+
+		fmt.Fprintf(&outBuf, "/connect/%d/", sessionID)
+
+		client(ctx, serverAddress, &outBuf, &inBuf)
+
+		require.Equal(t, fmt.Sprintf("/ack/%d/0/", sessionID), inBuf.String())
 
 	})
 
@@ -47,7 +47,7 @@ func TestServer(t *testing.T) {
 // client wraps the whole functionality of a UDP client that sends
 // a message and waits for a response coming back from the server
 // that it initially targeted.
-func client(ctx context.Context, address string, reader io.Reader) (err error) {
+func client(ctx context.Context, address string, r io.Reader, w io.Writer) (err error) {
 	// Resolve the UDP address so that we can make use of DialUDP
 	// with an actual IP and port instead of a name (in case a
 	// hostname is specified).
@@ -77,7 +77,7 @@ func client(ctx context.Context, address string, reader io.Reader) (err error) {
 		// should only occur in very resource-intensive situations:
 		// - when you've filled up the socket buffer and the OS
 		// can't dequeue the queue fast enough.
-		n, err := io.Copy(conn, reader)
+		n, err := io.Copy(conn, r)
 		if err != nil {
 			doneChan <- err
 			return
@@ -106,6 +106,10 @@ func client(ctx context.Context, address string, reader io.Reader) (err error) {
 		fmt.Printf("packet-received: bytes=%d from=%s\n",
 			nRead, addr.String())
 
+		if _, err := io.CopyN(w, bytes.NewBuffer(buffer), int64(nRead)); err != nil {
+			doneChan <- err
+			return
+		}
 		doneChan <- nil
 	}()
 
