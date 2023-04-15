@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,20 +23,45 @@ func TestServer(t *testing.T) {
 		require.NoError(t, err)
 	}()
 
-	t.Run("sample session", func(t *testing.T) {
+	t.Run(`The client connects with session token 12345, sends "Hello, world!" and then closes the session.`, func(t *testing.T) {
 		time.Sleep(time.Second / 2)
 
-		sessionID := 123456789
+		// Pass client address so it remains the same through UDP dials.
+		clientAddress := "localhost:9998"
+
+		sessionID := 12345
 		var outBuf bytes.Buffer
 		var inBuf bytes.Buffer
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 
+		// <-- /connect/12345/
 		fmt.Fprintf(&outBuf, "/connect/%d/", sessionID)
+		client(ctx, &serverAddress, &clientAddress, &outBuf, &inBuf)
 
-		client(ctx, serverAddress, &outBuf, &inBuf)
-
+		// --> /ack/12345/0/
 		require.Equal(t, fmt.Sprintf("/ack/%d/0/", sessionID), inBuf.String())
+
+		// Reset buffers between calls
+		outBuf.Reset()
+		inBuf.Reset()
+
+		// <-- /data/12345/0/Hello, world!/
+		data := "Hello, world!"
+		fmt.Fprintf(&outBuf, "/data/%d/0/%s/", sessionID, data)
+		client(ctx, &serverAddress, &clientAddress, &outBuf, &inBuf)
+
+		// --> /ack/12345/13/
+		require.Equal(t, fmt.Sprintf("/ack/%d/%d/", sessionID, len(data)), inBuf.String())
+
+		outBuf.Reset()
+		inBuf.Reset()
+
+		// <-- /close/12345/
+		closeMsg := fmt.Sprintf("/close/%d/", sessionID)
+		client(ctx, &serverAddress, &clientAddress, strings.NewReader(closeMsg), &inBuf)
+		// --> /close/12345/
+		require.Equal(t, closeMsg, inBuf.String())
 
 	})
 
@@ -47,13 +73,22 @@ func TestServer(t *testing.T) {
 // client wraps the whole functionality of a UDP client that sends
 // a message and waits for a response coming back from the server
 // that it initially targeted.
-func client(ctx context.Context, address string, r io.Reader, w io.Writer) (err error) {
+func client(ctx context.Context, remoteAddress, localAddress *string, r io.Reader, w io.Writer) (err error) {
 	// Resolve the UDP address so that we can make use of DialUDP
 	// with an actual IP and port instead of a name (in case a
 	// hostname is specified).
-	raddr, err := net.ResolveUDPAddr("udp", address)
+	remoteAddr, err := net.ResolveUDPAddr("udp", *remoteAddress)
 	if err != nil {
-		return
+		return err
+	}
+
+	// Allow setting the local address if needed. If nil passed, choose a random address.
+	var localAddr *net.UDPAddr
+	if localAddress != nil {
+		localAddr, err = net.ResolveUDPAddr("udp", *localAddress)
+		if err != nil {
+			return err
+		}
 	}
 
 	// Although we're not in a connection-oriented transport,
@@ -61,7 +96,7 @@ func client(ctx context.Context, address string, r io.Reader, w io.Writer) (err 
 	// a `connect(2)` syscall for a socket of type SOCK_DGRAM:
 	// - it forces the underlying socket to only read and write
 	// to and from a specific remote address.
-	conn, err := net.DialUDP("udp", nil, raddr)
+	conn, err := net.DialUDP("udp", localAddr, remoteAddr)
 	if err != nil {
 		return
 	}

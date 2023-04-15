@@ -82,7 +82,7 @@ func (l *Listener) Accept() (*StableConn, error) {
 			log.Printf("readFrom: %v", err)
 			continue
 		}
-		log.Printf("read %d bytes..", n)
+		log.Printf("read %d bytes from: %s", n, rAddr.String())
 		if n == 0 {
 			continue
 		}
@@ -116,6 +116,7 @@ func (l *Listener) handleConn(data []byte, remoteAddr net.Addr) error {
 				if len(msgParts) == l.msgLengths[MsgConnect] {
 					// /connect/SESSION/
 					sessionID := msgParts[1]
+
 					l.mu.Lock()
 					if _, ok := l.sessions[sessionID]; !ok {
 						l.sessions[sessionID] = &StableConn{
@@ -125,6 +126,7 @@ func (l *Listener) handleConn(data []byte, remoteAddr net.Addr) error {
 						}
 					}
 					sc = l.sessions[sessionID]
+					l.mu.Unlock()
 
 					// Reset msg buffer
 					msgParts = []string{}
@@ -139,6 +141,16 @@ func (l *Listener) handleConn(data []byte, remoteAddr net.Addr) error {
 					log.Printf("%s: %+v", MsgData, msgParts)
 					// /data/SESSION/POS/DATA/
 					sessionID := msgParts[1]
+					l.mu.Lock()
+					sess, ok := l.sessions[sessionID]
+					l.mu.Unlock()
+					// If the session is not open: send /close/SESSION/ and stop.
+					if !ok {
+						sc.sendClose()
+						return ErrSessionNotOpen
+					}
+					sc = sess
+
 					pos, err := strconv.Atoi(msgParts[2])
 					if err != nil {
 						return fmt.Errorf("parse data position: %w", err)
@@ -148,14 +160,6 @@ func (l *Listener) handleConn(data []byte, remoteAddr net.Addr) error {
 					msgParts = []string{}
 
 					log.Printf("sessionID: %s, pos: %d, data: %s", sessionID, pos, data)
-					// If the session is not open: send /close/SESSION/ and stop.
-					if sc.sessionID == nil {
-						sc.sendClose()
-						return ErrSessionNotOpen
-					}
-					if sessionID != *sc.sessionID {
-						return fmt.Errorf("expected ID: %q, but got %q", *sc.sessionID, sessionID)
-					}
 
 					// Check if recv everything so far
 					if pos > sc.BytesRecvd() {
@@ -199,13 +203,32 @@ func (l *Listener) handleConn(data []byte, remoteAddr net.Addr) error {
 			case MsgClose:
 				if len(msgParts) == l.msgLengths[MsgClose] {
 					// /close/SESSION/
-					log.Printf("%s: %+v", MsgClose, msgParts)
+					sessionID := msgParts[1]
+					sc := l.lookupSession(sessionID)
+					if sc == nil {
+						log.Print(ErrSessionNotOpen.Error())
+					}
+					if err := sc.sendClose(); err != nil {
+						log.Printf("sendClose: %v", err)
+					}
 				}
 			}
 		}
 	}
 
 	return nil
+}
+
+func (l *Listener) lookupSession(id string) *StableConn {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.sessions[id]
+}
+
+func (l *Listener) sendClose(rAddr net.Addr, sessionID string) error {
+	msg := fmt.Sprintf("/%s/%s/", MsgClose, sessionID)
+	_, err := l.udpConn.WriteTo([]byte(msg), rAddr)
+	return err
 }
 
 // ScanLRCPSection scans each section of an LRCP message, using "/" as the section delimiter. (Used bufio.ScanLines as example.)
