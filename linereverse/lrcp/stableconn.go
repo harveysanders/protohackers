@@ -80,9 +80,3 @@ func (sc *StableConn) sendData(data []byte, curPos int) (int, error) {
 
 	return sc.udpConn.WriteTo(msg.Bytes(), sc.remoteAddr)
 }
-
-func (sc *StableConn) sendClose() error {
-	msg := fmt.Sprintf("/%s/%s/", MsgClose, *sc.sessionID)
-	_, err := sc.udpConn.WriteTo([]byte(msg), sc.remoteAddr)
-	return err
-}

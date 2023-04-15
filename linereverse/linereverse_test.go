@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"strings"
 	"testing"
@@ -17,7 +18,7 @@ import (
 func TestServer(t *testing.T) {
 	serverAddress := "localhost:9002"
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, stopServer := context.WithCancel(context.Background())
 	go func() {
 		err := linereverse.New().Run(ctx, serverAddress)
 		require.NoError(t, err)
@@ -32,8 +33,8 @@ func TestServer(t *testing.T) {
 		sessionID := 12345
 		var outBuf bytes.Buffer
 		var inBuf bytes.Buffer
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+		ctx, stopClient := context.WithCancel(context.Background())
+		defer stopClient()
 
 		// <-- /connect/12345/
 		fmt.Fprintf(&outBuf, "/connect/%d/", sessionID)
@@ -65,7 +66,64 @@ func TestServer(t *testing.T) {
 
 	})
 
-	cancel()
+	t.Run("Reverses a line in an LRCP message", func(t *testing.T) {
+		time.Sleep(time.Second / 2)
+		sessionID := randPort()
+		clientAddress := fmt.Sprintf("localhost:%s", sessionID)
+
+		var outBuf bytes.Buffer
+		var inBuf bytes.Buffer
+		ctx, stopClient := context.WithCancel(context.Background())
+		defer stopClient()
+
+		testCases := []struct {
+			msg       string
+			wantReply string
+			msgDesc   string
+			replyDesc string
+		}{
+			{
+				msgDesc:   "<-- /connect/12345/",
+				msg:       fmt.Sprintf("/connect/%s/", sessionID),
+				replyDesc: "--> /ack/12345/0/",
+				wantReply: fmt.Sprintf("/ack/%s/0/", sessionID),
+			},
+			{
+				msgDesc:   "<-- /data/12345/0/hello\n/",
+				msg:       fmt.Sprintf("/data/%s/0/hello\n/", sessionID),
+				replyDesc: "--> /ack/12345/6/",
+				wantReply: fmt.Sprintf("/ack/%s/6/", sessionID),
+			},
+			// x <-- /connect/12345/
+			// x --> /ack/12345/0/
+			// x <-- /data/12345/0/hello\n/
+			// x --> /ack/12345/6/
+			// TODO:
+			// --> /data/12345/0/olleh\n/
+			// <-- /ack/12345/6/
+			// <-- /data/12345/6/Hello, world!\n/
+			// --> /ack/12345/20/
+			// --> /data/12345/6/!dlrow ,olleH\n/
+			// <-- /ack/12345/20/
+			// <-- /close/12345/
+			// --> /close/12345/
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.msgDesc, func(t *testing.T) {
+				// Reset buffers between calls
+				outBuf.Reset()
+				inBuf.Reset()
+
+				fmt.Fprintf(&outBuf, tc.msg)
+				client(ctx, &serverAddress, &clientAddress, &outBuf, &inBuf)
+				require.Equal(t, tc.wantReply, inBuf.String())
+
+			})
+		}
+
+	})
+	stopServer()
 }
 
 // ****** https://hashnode.com/post/a-udp-server-and-client-in-go-cjn3fm10s00is25s1bm12gd22 ****
@@ -157,4 +215,11 @@ func client(ctx context.Context, remoteAddress, localAddress *string, r io.Reade
 	}
 
 	return
+}
+
+func randPort() string {
+	min := 10000
+	max := 12000
+	port := rand.Intn(max-min) + min
+	return fmt.Sprint(port)
 }

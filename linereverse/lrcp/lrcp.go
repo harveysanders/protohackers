@@ -141,15 +141,14 @@ func (l *Listener) handleConn(data []byte, remoteAddr net.Addr) error {
 					log.Printf("%s: %+v", MsgData, msgParts)
 					// /data/SESSION/POS/DATA/
 					sessionID := msgParts[1]
-					l.mu.Lock()
-					sess, ok := l.sessions[sessionID]
-					l.mu.Unlock()
+					sc = l.lookupSession(sessionID)
 					// If the session is not open: send /close/SESSION/ and stop.
-					if !ok {
-						sc.sendClose()
+					if sc == nil {
+						if err := l.sendClose(remoteAddr, sessionID); err != nil {
+							log.Printf("sendClose: %v", err)
+						}
 						return ErrSessionNotOpen
 					}
-					sc = sess
 
 					pos, err := strconv.Atoi(msgParts[2])
 					if err != nil {
@@ -208,7 +207,7 @@ func (l *Listener) handleConn(data []byte, remoteAddr net.Addr) error {
 					if sc == nil {
 						log.Print(ErrSessionNotOpen.Error())
 					}
-					if err := sc.sendClose(); err != nil {
+					if err := l.sendClose(remoteAddr, sessionID); err != nil {
 						log.Printf("sendClose: %v", err)
 					}
 				}
