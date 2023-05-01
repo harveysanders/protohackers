@@ -1,7 +1,6 @@
 package linereverse
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -11,65 +10,55 @@ import (
 )
 
 type App struct {
+	in  chan lrcp.SessionMsg
+	out chan lrcp.SessionMsg
 }
 
 func New() *App {
-	return &App{}
+	return &App{
+		in:  make(chan lrcp.SessionMsg, 1024),
+		out: make(chan lrcp.SessionMsg, 1024),
+	}
 }
 
 func (a *App) Run(ctx context.Context, address string) error {
-	l, err := lrcp.Listen(address)
+	l, err := lrcp.Listen(address, a.in, a.out)
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return l.Close()
-		default:
-			conn, err := l.Accept()
-			if err != nil {
-				log.Printf("accept: %v", err)
-			}
-			go func(c *lrcp.StableConn) {
-				err := reverseLines(c)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				l.Close()
+				return
+			case msg := <-a.in:
+				line := msg.Data
+				reversed, err := reverseLine(line)
 				if err != nil {
-					log.Printf("reverseLines: %v", err)
+					log.Printf("reverseLine: %v", err)
 				}
-			}(conn)
+				msg.Data = reversed
+				a.out <- msg
+			}
 		}
-	}
-}
+	}()
 
-// RevereLines reads lines from r, reverses the contents and writes the result to w.
-func reverseLines(c *lrcp.StableConn) error {
-	scr := bufio.NewScanner(c)
-	scr.Split(bufio.ScanLines)
-
-	for scr.Scan() {
-		if scr.Err() != nil {
-			return scr.Err()
-		}
-		line, err := reverseLine(scr.Bytes())
-		if err != nil {
-			return err
-		}
-		_, err = c.Write(append(line, '\n'))
-		if err != nil {
-			return err
-		}
-	}
+	l.Accept()
 	return nil
 }
 
 func reverseLine(line []byte) ([]byte, error) {
 	var out bytes.Buffer
-	for i := len(line); i >= 0; i-- {
+	for i := len(line) - 1; i >= 0; i-- {
 		err := out.WriteByte(line[i])
 		if err != nil {
 			return out.Bytes(), err
 		}
+	}
+	if _, err := out.WriteRune('\n'); err != nil {
+		return out.Bytes(), err
 	}
 	return out.Bytes(), nil
 }

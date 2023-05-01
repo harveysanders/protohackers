@@ -77,22 +77,25 @@ func TestServer(t *testing.T) {
 		defer stopClient()
 
 		testCases := []struct {
-			msg       string
-			wantReply string
-			msgDesc   string
-			replyDesc string
+			msg         string
+			wantReplies []string
+			msgDesc     string
+			replyDesc   string
 		}{
 			{
-				msgDesc:   "<-- /connect/12345/",
-				msg:       fmt.Sprintf("/connect/%s/", sessionID),
-				replyDesc: "--> /ack/12345/0/",
-				wantReply: fmt.Sprintf("/ack/%s/0/", sessionID),
+				msgDesc:     "<-- /connect/12345/",
+				msg:         fmt.Sprintf("/connect/%s/", sessionID),
+				replyDesc:   "--> /ack/12345/0/",
+				wantReplies: []string{fmt.Sprintf("/ack/%s/0/", sessionID)},
 			},
 			{
 				msgDesc:   "<-- /data/12345/0/hello\n/",
 				msg:       fmt.Sprintf("/data/%s/0/hello\n/", sessionID),
-				replyDesc: "--> /ack/12345/6/",
-				wantReply: fmt.Sprintf("/ack/%s/6/", sessionID),
+				replyDesc: "reply with ack and reversed data",
+				wantReplies: []string{
+					fmt.Sprintf("/ack/%s/6/", sessionID),
+					fmt.Sprintf("/data/%s/0/olleh\n", sessionID),
+				},
 			},
 			// x <-- /connect/12345/
 			// x --> /ack/12345/0/
@@ -117,8 +120,16 @@ func TestServer(t *testing.T) {
 
 				fmt.Fprintf(&outBuf, tc.msg)
 				client(ctx, &serverAddress, &clientAddress, &outBuf, &inBuf)
-				require.Equal(t, tc.wantReply, inBuf.String())
 
+				require.Equal(t, tc.wantReplies[0], inBuf.String())
+
+				if len(tc.wantReplies) > 1 {
+					outBuf.Reset()
+					inBuf.Reset()
+					client(ctx, &serverAddress, &clientAddress, &outBuf, &inBuf)
+
+					require.Equal(t, tc.wantReplies[1], inBuf.String())
+				}
 			})
 		}
 

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"strconv"
@@ -32,15 +31,22 @@ type (
 		localAddr             net.Addr
 		udpConn               *net.UDPConn
 		msgLengths            map[string]int
+		appIn                 chan SessionMsg
+		appOut                chan SessionMsg
 
 		mu       sync.Mutex
 		sessions map[string]*StableConn
 	}
 
+	SessionMsg struct {
+		ID   string
+		Data []byte
+	}
+
 	sectionPos int
 )
 
-func Listen(address string) (*Listener, error) {
+func Listen(address string, in, out chan SessionMsg) (*Listener, error) {
 	localAddr, err := net.ResolveUDPAddr("udp", address)
 	if err != nil {
 		return nil, fmt.Errorf("resolveUDPAddr: %w", err)
@@ -50,7 +56,8 @@ func Listen(address string) (*Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listenUDP: %w", err)
 	}
-	return &Listener{
+
+	l := &Listener{
 		bufSize:               1024,
 		retransmissionTimeout: time.Second * 3,
 		sessionExpiryTimeout:  time.Second * 60,
@@ -63,18 +70,25 @@ func Listen(address string) (*Listener, error) {
 			string(MsgClose):   2, // /close/SESSION/
 		},
 		sessions: map[string]*StableConn{},
-	}, nil
+		appIn:    in,
+		appOut:   out,
+	}
+
+	go l.outboundPump()
+
+	return l, nil
 }
 
 func (l *Listener) Close() error {
 	return l.udpConn.Close()
 }
 
-func (l *Listener) Accept() (*StableConn, error) {
+func (l *Listener) Accept() {
 	buffer := make([]byte, l.bufSize)
 	for {
 		if err := l.udpConn.SetReadDeadline(time.Now().Add(l.sessionExpiryTimeout)); err != nil {
-			return nil, fmt.Errorf("setReadDeadline: %w", err)
+			log.Printf("setReadDeadline: %v", err)
+			return
 		}
 		n, rAddr, err := l.udpConn.ReadFromUDP(buffer)
 		if err != nil {
@@ -119,11 +133,11 @@ func (l *Listener) handleConn(data []byte, remoteAddr net.Addr) error {
 
 					l.mu.Lock()
 					if _, ok := l.sessions[sessionID]; !ok {
-						l.sessions[sessionID] = &StableConn{
-							sessionID:  &sessionID,
-							remoteAddr: remoteAddr,
-							udpConn:    *l.udpConn,
-						}
+						l.sessions[sessionID] = newStableConn(
+							sessionID,
+							remoteAddr,
+							*l.udpConn,
+						)
 					}
 					sc = l.sessions[sessionID]
 					l.mu.Unlock()
@@ -160,39 +174,22 @@ func (l *Listener) handleConn(data []byte, remoteAddr net.Addr) error {
 
 					log.Printf("sessionID: %s, pos: %d, data: %s", sessionID, pos, data)
 
-					// Check if recv everything so far
-					if pos > sc.BytesRecvd() {
-						// missing data. send prev ack
-						if err := sc.sendAck(sc.BytesRecvd()); err != nil {
-							log.Printf("sendAck: %v", err)
-						}
-						continue
-					}
-					if pos == sc.BytesRecvd() {
-						// Write data to buffer at pos
-						if _, err := sc.recvBuf.Write(unescapeSlashes([]byte(data))); err != nil {
-							return fmt.Errorf("recvBuf.Write: %w", err)
-						}
-						if err := sc.sendAck(sc.BytesRecvd()); err != nil {
-							log.Printf("sendAck: %v", err)
-						}
-						continue
-					}
-					// we already have more bytes than pos. Most likely a problem? Start over?
-					log.Printf("POS: %d, BYTES RECV: %d", pos, sc.BytesRecvd())
-					if err := sc.sendAck(sc.BytesRecvd()); err != nil {
-						log.Printf("sendAck: %v", err)
-					}
-					sendRdr := bufio.NewReader(&sc.sendBuf)
-					sendData, err := sendRdr.ReadBytes('\n')
+					nextPos, err := sc.handleData([]byte(data), pos)
 					if err != nil {
-						if err == io.EOF {
-							continue
-						}
-						return fmt.Errorf("sendRdr.ReadBytes: %w", err)
+						return fmt.Errorf("handleData: %w", err)
 					}
-					sc.sendData(sendData, sc.bytesSent)
-					continue
+
+					if err := sc.sendAck(nextPos); err != nil {
+						return fmt.Errorf("sendAck: %w", err)
+					}
+
+					// Send completed line off to app layer
+					line, rest, isCompleteLine := bytes.Cut(sc.recvBuf, []byte("\n"))
+					log.Printf("rest: %d", len(rest))
+					if isCompleteLine {
+						l.appIn <- SessionMsg{ID: *sc.sessionID, Data: line}
+					}
+
 				}
 			case MsgAck:
 				if len(msgParts) == l.msgLengths[MsgAck] {
@@ -230,6 +227,24 @@ func (l *Listener) sendClose(rAddr net.Addr, sessionID string) error {
 	return err
 }
 
+func (l *Listener) outboundPump() {
+	for {
+		msg := <-l.appOut
+		escaped := escapeSlashes(msg.Data)
+		sc := l.lookupSession(msg.ID)
+		if sc == nil {
+			log.Printf("%v: %q", ErrSessionNotOpen, msg.ID)
+			continue
+		}
+		n, err := sc.sendData(escaped, 0)
+		if err != nil {
+			log.Printf("writeTo: %v", err)
+			continue
+		}
+		log.Printf("responded with %d byte to %s", n, *sc.sessionID)
+	}
+}
+
 // ScanLRCPSection scans each section of an LRCP message, using "/" as the section delimiter. (Used bufio.ScanLines as example.)
 func ScanLRCPSection(data []byte, atEOF bool) (advance int, token []byte, err error) {
 	if atEOF && len(data) == 0 {
@@ -246,6 +261,19 @@ func ScanLRCPSection(data []byte, atEOF bool) (advance int, token []byte, err er
 	}
 	// Request more data.
 	return 0, nil, nil
+}
+
+func (l *Listener) lineListen(sc *StableConn) {
+	scr := bufio.NewScanner(bytes.NewBuffer(sc.recvBuf))
+	for scr.Scan() {
+		err := scr.Err()
+		if err != nil {
+			log.Printf("scan: %v", err)
+			return
+		}
+		line := scr.Text()
+		l.appIn <- SessionMsg{ID: *sc.sessionID, Data: []byte(line)}
+	}
 }
 
 func unescapeSlashes(data []byte) []byte {
