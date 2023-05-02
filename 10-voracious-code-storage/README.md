@@ -24,10 +24,13 @@ Good luck!
 - Each message is delimited by a newline `\n`.
 - Messages should be interpreted as ASCII
 - Each client message begins with a _method_ defined below:
+- After serving each request message, the server should respond with a `READY` line to inform the client it's ready for more requests.
+
+### Revision Number
+
+A _revision number_ begins with a `r` followed by an `int`. Revision numbers start at `r1`. Each `PUT` to the same _filepath_ increments the revision number.
 
 ### Methods
-
-#### `GET`:
 
 #### `PUT`:
 
@@ -48,9 +51,34 @@ PUT /test.txt 6\nhello\n
 
 The server should respond with an `OK` followed by the _revision number_.
 
-#### Revision Number
+#### `GET`:
 
-A _revision number_ begins with a `r` followed by an `int`. Revision numbers start at `r1`. Each `PUT` to the same _filepath_ increments the revision number.
+`GET` messages contain the method `GET`, the _filepath_ and an optional _revision number_. If the revision number is omitted, the _latest revision_ is returned, otherwise the revision requested by the client is returned.
+The server should respond with
+
+- a line containing `OK` and the the revision's content-length, including the trailing newline
+- the file contents on the next line
+- finally a `READY` line
+
+Examples:
+
+Revision number provided
+
+```
+<-- GET /text.txt r1\n
+--> OK 14\n
+--> hello, world!\n
+--> READY\n
+```
+
+Revision number omitted. Latest revision returned:
+
+```
+<-- GET /text.txt\n
+--> OK 8\n
+--> bonjour\n
+--> READY\n
+```
 
 ### Example Session
 
@@ -61,10 +89,13 @@ Client messages denoted with `<--`. Server responses denoted with `-->`.
 <-- PUT /test.txt 14\n
 <-- hello, world!\n
 --> OK r1\n
+--> READY\n
 <-- PUT /test.txt 17\n
 <-- ¡hola, la gente!\n
 --> OK r2\n
-<-- GET /text.txt r1
---> OK 14
+--> READY\n
+<-- GET /text.txt r1\n
+--> OK 14\n
 --> hello, world!\n
+--> READY\n
 ```
