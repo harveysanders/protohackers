@@ -4,7 +4,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/harveysanders/protohackers/mobprox"
+	mobprox "github.com/harveysanders/protohackers/5-mob-in-the-middle"
 )
 
 func main() {

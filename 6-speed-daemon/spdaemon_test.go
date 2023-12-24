@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/harveysanders/protohackers/spdaemon"
-	"github.com/harveysanders/protohackers/spdaemon/message"
+	spdaemon "github.com/harveysanders/protohackers/6-speed-daemon"
+	"github.com/harveysanders/protohackers/6-speed-daemon/message"
 	"github.com/stretchr/testify/require"
 )
 

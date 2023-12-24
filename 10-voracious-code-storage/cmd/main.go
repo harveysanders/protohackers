@@ -4,7 +4,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/harveysanders/protohackers/vcs"
+	vcs "github.com/harveysanders/protohackers/10-voracious-code-storage"
 )
 
 func main() {

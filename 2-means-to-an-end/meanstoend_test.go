@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	m2e "github.com/harveysanders/protohackers/meanstoend"
+	m2e "github.com/harveysanders/protohackers/2-means-to-an-end"
 	"github.com/stretchr/testify/require"
 )
 

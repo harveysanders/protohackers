@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/harveysanders/protohackers/udb"
+	udb "github.com/harveysanders/protohackers/4-unusual-database-program"
 )
 
 func main() {

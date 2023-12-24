@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/harveysanders/protohackers/spdaemon"
+	spdaemon "github.com/harveysanders/protohackers/6-speed-daemon"
 )
 
 func main() {

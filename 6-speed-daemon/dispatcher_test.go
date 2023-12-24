@@ -3,7 +3,7 @@ package spdaemon_test
 import (
 	"testing"
 
-	"github.com/harveysanders/protohackers/spdaemon"
+	spdaemon "github.com/harveysanders/protohackers/6-speed-daemon"
 	"github.com/stretchr/testify/require"
 )
 

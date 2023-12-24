@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/harveysanders/protohackers/udb"
+	udb "github.com/harveysanders/protohackers/4-unusual-database-program"
 	"github.com/stretchr/testify/require"
 )
 

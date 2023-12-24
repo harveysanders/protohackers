@@ -4,7 +4,7 @@ import (
 	"log"
 	"os"
 
-	m2e "github.com/harveysanders/protohackers/meanstoend"
+	m2e "github.com/harveysanders/protohackers/2-means-to-an-end"
 )
 
 func main() {

@@ -4,7 +4,7 @@ import (
 	"log"
 	"os"
 
-	chat "github.com/harveysanders/protohackers/budgetchat"
+	chat "github.com/harveysanders/protohackers/3-budget-chat"
 )
 
 func main() {

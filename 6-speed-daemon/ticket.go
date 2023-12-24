@@ -4,7 +4,7 @@ import (
 	"math"
 	"time"
 
-	"github.com/harveysanders/protohackers/spdaemon/message"
+	"github.com/harveysanders/protohackers/6-speed-daemon/message"
 )
 
 type (
