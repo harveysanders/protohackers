@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -36,25 +35,35 @@ func TestServer(t *testing.T) {
 		want    []byte
 	}{
 		{
-			payload: []byte(`{"number":13,"method":"isPrime"}\n\n`),
-			want:    []byte(`{"method":"isPrime","prime":true}\n`),
+			label:   "number:13",
+			payload: []byte(`{"number":13,"method":"isPrime"}`),
+			want:    []byte(`{"method":"isPrime","prime":true}`),
 		},
-		// {
-		// 	payload: []byte(`{"number":3424891,"method":"isPrime"}`),
-		// 	want:    []byte(`{"method":"isPrime","prime":false}`),
-		// },
-		// {
-		// 	payload: []byte(`{"method":"isPrime","number":50726007}`),
-		// 	want:    []byte(`{"method":"isPrime","prime":false}`),
-		// },
-		// {
-		// 	payload: []byte(`{"number":19860059,"method":"isPrime"}`),
-		// 	want:    []byte(`{"method":"isPrime","prime":true}`),
-		// },
-		// {
-		// 	payload: []byte(`{"method":"isPrime","number":44941019}`),
-		// 	want:    []byte(`{"method":"isPrime","prime":true}`),
-		// },
+		{
+			label:   "number:3424891",
+			payload: []byte(`{"number":3424891,"method":"isPrime"}`),
+			want:    []byte(`{"method":"isPrime","prime":false}`),
+		},
+		{
+			label:   "number:50726007",
+			payload: []byte(`{"method":"isPrime","number":50726007}`),
+			want:    []byte(`{"method":"isPrime","prime":false}`),
+		},
+		{
+			label:   "number:19860059",
+			payload: []byte(`{"number":19860059,"method":"isPrime"}`),
+			want:    []byte(`{"method":"isPrime","prime":true}`),
+		},
+		{
+			label:   "number:44941019",
+			payload: []byte(`{"method":"isPrime","number":44941019}`),
+			want:    []byte(`{"method":"isPrime","prime":false}`),
+		},
+		{
+			label:   "number:910400.1234",
+			payload: []byte(`{"method":"isPrime","number":910400.1234}`),
+			want:    []byte(`{"method":"isPrime","prime":false}`),
+		},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.label, func(t *testing.T) {
@@ -64,14 +73,13 @@ func TestServer(t *testing.T) {
 
 			conn.SetReadDeadline(time.Now().Add(time.Second * 2))
 
-			if _, err := io.CopyN(conn, bytes.NewReader(tc.payload), int64(len(tc.payload)-1)); err != nil {
-				t.Error("could not write payload to TCP server:", err)
-			}
+			_, err = io.CopyN(conn, bytes.NewReader(append(tc.payload, "\n"...)), int64(len(tc.payload)+1))
+			require.NoError(t, err, "could not write payload to TCP server")
 
 			var got bytes.Buffer
-			_, err = io.CopyN(&got, conn, 20)
+			_, err = io.CopyN(&got, conn, int64(len(tc.want)+1))
 			require.NoError(t, err)
-			fmt.Printf("buff %s", got.String())
+			require.Equal(t, string(append(tc.want, "\n"...)), got.String())
 		})
 	}
 }

@@ -75,8 +75,7 @@ func (s *Server) handleConnections() (err error) {
 }
 
 func handleConnection(c net.Conn, clientID int) {
-	lr := io.LimitReader(c, 4096)
-	conn := textproto.NewReader(bufio.NewReader(lr))
+	conn := textproto.NewReader(bufio.NewReader(c))
 	err := (func(clientID int) error {
 		reqID := 0
 		for {
@@ -153,11 +152,16 @@ func validateReq(r request) bool {
 }
 
 func isPrime(n float64) bool {
+	if n <= 1 {
+		return false
+	}
 	if n == 2 || n == 3 {
 		return true
 	}
-
-	if n <= 1 || math.Mod(n, 2) == 0 || math.Mod(n, 3) == 0 {
+	if !isInteger(n) {
+		return false
+	}
+	if math.Mod(n, 2) == 0 || math.Mod(n, 3) == 0 {
 		return false
 	}
 
@@ -167,4 +171,8 @@ func isPrime(n float64) bool {
 		}
 	}
 	return true
+}
+
+func isInteger(n float64) bool {
+	return n == float64(int(n))
 }
