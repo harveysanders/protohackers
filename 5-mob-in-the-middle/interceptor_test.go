@@ -22,6 +22,18 @@ func TestBcoinReplacer(t *testing.T) {
 			input: []byte("Hi alice, my address is 7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX. Send it there"),
 			want:  []byte("Hi alice, my address is 7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX. Send it there"),
 		},
+		{
+			label: "handles newlines at the end of a message",
+			input: []byte(`Hi alice, please send payment to 7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX
+`),
+			want: []byte(`Hi alice, please send payment to 7YWHMfk9JZe0LM0g1ZauHuiSxhI
+`),
+		},
+		{
+			label: "handles multiple addresses in a message",
+			input: []byte("Please pay the ticket price of 15 Boguscoins to one of these addresses: 76TaUbtoWIjufQZYZ5eHBjZYl1Yg 7EViBcjBeCzkIDD7QRMEmbbSgFyzg 7sxiP0k46XkP3x5nLdqwewRPNRJKW1Nwcnp"),
+			want:  []byte("Please pay the ticket price of 15 Boguscoins to one of these addresses: 7YWHMfk9JZe0LM0g1ZauHuiSxhI 7YWHMfk9JZe0LM0g1ZauHuiSxhI 7YWHMfk9JZe0LM0g1ZauHuiSxhI"),
+		},
 	}
 
 	tonyBcoin := "7YWHMfk9JZe0LM0g1ZauHuiSxhI"

@@ -10,6 +10,27 @@
       "request": "launch",
       "mode": "auto",
       "program": "${workspaceFolder}/1-prime-time/main.go",
+    },
+    {
+      "name": "04 - Unusual Database Program",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/4-unusual-database-program/cmd",
+      "env": {
+        "HOST": "0.0.0.0",
+        "PORT": "9000"
+      }
+    },
+    {
+      "name": "05 - Mob in the middle",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/5-mob-in-the-middle/cmd",
+      "env": {
+        "PORT": "9000"
+      }
     }
   ]
 }

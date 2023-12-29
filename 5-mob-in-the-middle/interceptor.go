@@ -40,7 +40,8 @@ func (b *bcoinReplacer) intercept(in []byte) []byte {
 		return in
 	}
 
-	in = bytes.TrimSuffix(in, []byte("\n"))
+	endsWithNewline := in[len(in)-1] == '\n'
+	in = bytes.TrimSpace(in)
 	// Remove the original
 	origBcoin := in[startI:endI]
 	in = bytes.Replace(in, origBcoin, []byte(""), 1)
@@ -55,6 +56,8 @@ func (b *bcoinReplacer) intercept(in []byte) []byte {
 	// Address was at the end of the message
 	out = append(out, in...)
 	out = append(out, []byte(b.bCoinAddr)...)
-	out = append(out, '\n')
+	if endsWithNewline {
+		out = append(out, '\n')
+	}
 	return out
 }
