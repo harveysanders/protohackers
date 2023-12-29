@@ -98,6 +98,31 @@ func TestServer(t *testing.T) {
 
 	})
 
+	t.Run("handles newlines", func(t *testing.T) {
+		insert := `SaneAlice471=all jackdaws
+sphinx quartz prisoners quartz peach good prisoners all for the giant peach is hypnotic now the time party nasa intrusion
+`
+		query := "SaneAlice471"
+		conn, err := net.DialUDP("udp", nil, raddr)
+		require.NoError(t, err)
+		defer conn.Close()
+
+		n, err := conn.Write([]byte(insert))
+		require.NoError(t, err)
+		require.Equal(t, len(insert), n)
+
+		time.Sleep(time.Second / 2)
+		n, err = conn.Write([]byte(query))
+		require.NoError(t, err)
+		require.Equal(t, len(query), n)
+
+		res := make([]byte, 1000)
+		n, fromAddr, err := conn.ReadFrom(res)
+		require.NoError(t, err)
+		require.Equal(t, raddr.String(), fromAddr.String())
+		require.Equal(t, insert, string(res[:n]))
+	})
+
 	time.Sleep(time.Second)
 	cancel()
 }

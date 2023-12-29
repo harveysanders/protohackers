@@ -60,9 +60,9 @@ func (s *server) ServeUDP(ctx context.Context, address string) error {
 	defer pConn.Close()
 
 	done := make(chan error, 1)
-	buffer := make([]byte, s.maxBufferSize)
 
 	go func() {
+		buffer := make([]byte, s.maxBufferSize)
 		for {
 			n, fromAddr, err := pConn.ReadFrom(buffer)
 			if err != nil {
@@ -73,7 +73,6 @@ func (s *server) ServeUDP(ctx context.Context, address string) error {
 			// Copy contents to new slice so we don't reference the data in the ever-changing buffer.
 			msg := make([]byte, n)
 			copy(msg, buffer[:n])
-			msg = bytes.Trim(msg, "\n")
 
 			if IsInsert(msg) {
 				// log.Printf("** INSERT **\nfrom: %s\ncontents: %s\n*************\n", fromAddr.String(), msg)
@@ -93,7 +92,7 @@ func (s *server) ServeUDP(ctx context.Context, address string) error {
 				return
 			}
 
-			pConn.WriteTo(resp, fromAddr)
+			_, err = pConn.WriteTo(resp, fromAddr)
 			if err != nil {
 				done <- err
 				return
