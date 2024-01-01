@@ -18,9 +18,9 @@ func TestBcoinReplacer(t *testing.T) {
 			want:  []byte("Hi alice, please send payment to 7YWHMfk9JZe0LM0g1ZauHuiSxhI"),
 		},
 		{
-			label: "ignores valid address in the middle of a message",
+			label: "replaces valid address in the middle of a message",
 			input: []byte("Hi alice, my address is 7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX. Send it there"),
-			want:  []byte("Hi alice, my address is 7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX. Send it there"),
+			want:  []byte("Hi alice, my address is 7YWHMfk9JZe0LM0g1ZauHuiSxhI. Send it there"),
 		},
 		{
 			label: "handles newlines at the end of a message",
@@ -33,6 +33,11 @@ func TestBcoinReplacer(t *testing.T) {
 			label: "handles multiple addresses in a message",
 			input: []byte("Please pay the ticket price of 15 Boguscoins to one of these addresses: 76TaUbtoWIjufQZYZ5eHBjZYl1Yg 7EViBcjBeCzkIDD7QRMEmbbSgFyzg 7sxiP0k46XkP3x5nLdqwewRPNRJKW1Nwcnp"),
 			want:  []byte("Please pay the ticket price of 15 Boguscoins to one of these addresses: 7YWHMfk9JZe0LM0g1ZauHuiSxhI 7YWHMfk9JZe0LM0g1ZauHuiSxhI 7YWHMfk9JZe0LM0g1ZauHuiSxhI"),
+		},
+		{
+			label: "handles message already containing Tony's boguscoin address",
+			input: []byte(`Please pay the ticket price of 15 Boguscoins to one of these addresses: 7YWHMfk9JZe0LM0g1ZauHuiSxhI 7YWHMfk9JZe0LM0g1ZauHuiSxhI`),
+			want:  []byte(`Please pay the ticket price of 15 Boguscoins to one of these addresses: 7YWHMfk9JZe0LM0g1ZauHuiSxhI 7YWHMfk9JZe0LM0g1ZauHuiSxhI`),
 		},
 	}
 

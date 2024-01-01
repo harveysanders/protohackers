@@ -121,7 +121,7 @@ func (c *client) proxy(
 		msg := make([]byte, nRead)
 		copy(msg, buf)
 
-		log.Printf("\n← [%s|%s]:\n%s\n", c.id, srcName, msg)
+		log.Printf("\n← [%s|%s] (%d B):\n%s\n", c.id, srcName, nRead, msg)
 
 		// Replace message contents
 		msg = interceptor.intercept(msg)
@@ -135,6 +135,6 @@ func (c *client) proxy(
 			return
 		}
 
-		log.Printf("\n→ [%s,%s] (%d B):\n%s\n", c.id, dstName, nWrote, msg)
+		log.Printf("\n→ [%s|%s] (%d B):\n%s\n", c.id, dstName, nWrote, msg)
 	}
 }
