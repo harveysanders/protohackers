@@ -22,7 +22,7 @@ func newbcoinReplacer(bCoinAddr string) *bcoinReplacer {
 		// it consists of at least 26, and at most 35, alphanumeric characters
 		// it starts at the start of a chat message, or is preceded by a space
 		// it ends at the end of a chat message, or is followed by a space
-		bCoinPattern: regexp.MustCompile(`\s?(7\w{25,34})\s?`),
+		bCoinPattern: regexp.MustCompile(`\s?(\b7\w{25,35}-?)\s?`),
 	}
 }
 
@@ -44,6 +44,13 @@ func (b *bcoinReplacer) intercept(in []byte) []byte {
 		// Remove the original
 		origBcoin := _in[startI:endI]
 		if bytes.Equal(origBcoin, []byte(b.bCoinAddr)) {
+			continue
+		}
+		// Hack to ignore invalid characters. Couldn't get the regexp to work yet.
+		if len(origBcoin) > 35 {
+			continue
+		}
+		if bytes.ContainsAny(origBcoin[len(origBcoin)-1:], "-") {
 			continue
 		}
 
