@@ -1,11 +1,13 @@
 package mobprox
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"net/textproto"
 )
 
 type (
@@ -107,9 +109,9 @@ func (c *client) proxy(
 	}
 
 	// Read from the source connection
-	buf := make([]byte, 1024)
 	for {
-		nRead, err := src.Read(buf)
+		conn := textproto.NewReader(bufio.NewReader(src))
+		msg, err := conn.ReadLineBytes()
 		if err != nil {
 			log.Printf("[%s|%s]read error: %v\n", c.id, srcName, err)
 			dst.Close()
@@ -117,11 +119,9 @@ func (c *client) proxy(
 			return
 		}
 
-		// Grab the only the message bytes from the buffer
-		msg := make([]byte, nRead)
-		copy(msg, buf)
-
-		log.Printf("\n← [%s|%s] (%d B):\n%s\n", c.id, srcName, nRead, msg)
+		// Replace the newline removed from ReadLineBytes()
+		msg = append(msg, '\n')
+		log.Printf("\n← [%s|%s] (%d B):\n%s\n", c.id, srcName, len(msg), msg)
 
 		// Replace message contents
 		msg = interceptor.intercept(msg)
