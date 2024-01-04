@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/textproto"
 )
 
 type (
@@ -110,8 +109,12 @@ func (c *client) proxy(
 
 	// Read from the source connection
 	for {
-		conn := textproto.NewReader(bufio.NewReader(src))
-		msg, err := conn.ReadLineBytes()
+		srcConn := bufio.NewReader(src)
+		// Using ReadBytes instead of textproto.Reader.ReadLineBytes because
+		// ReadLineBytes will return the last line of the message, even if it
+		// doesn't end in a newline. bufio.Reader.ReadBytes will return an error if
+		// the message doesn't end in a newline.
+		msg, err := srcConn.ReadBytes('\n')
 		if err != nil {
 			log.Printf("[%s|%s]read error: %v\n", c.id, srcName, err)
 			dst.Close()
@@ -119,8 +122,6 @@ func (c *client) proxy(
 			return
 		}
 
-		// Replace the newline removed from ReadLineBytes()
-		msg = append(msg, '\n')
 		log.Printf("\n← [%s|%s] (%d B):\n%s\n", c.id, srcName, len(msg), msg)
 
 		// Replace message contents
