@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 )
 
 var (
@@ -63,7 +64,7 @@ func (sc *StableConn) sendAck(pos int) error {
 	return nil
 }
 
-// handleData takes escaped data from the wire and appends it to the internal buffer at position pos. If pos is past the current buffer position, data is ignored and the current position is returned. The ASCII data is unescaped before inserted into the internal buffer.
+// HandleData takes escaped data from the wire and appends it to the internal buffer at position pos. If pos is past the current buffer position, data is ignored and the current position is returned. The ASCII data is unescaped before inserted into the internal buffer.
 func (sc *StableConn) handleData(rawData []byte, pos int) (nextPos int, err error) {
 	// Don't create data gaps (yet)
 	if sc.BytesRecvd() < pos {
@@ -91,7 +92,7 @@ func (sc *StableConn) sendData(data []byte, curPos int) (int, error) {
 	if sc.sessionID == nil {
 		return 0, ErrSessionNotOpen
 	}
-	msgHeader := fmt.Sprintf("/%s/%s/%d/", MsgData, *sc.sessionID, len(data)+curPos)
+	msgHeader := fmt.Sprintf("/%s/%s/%d/", MsgData, *sc.sessionID, curPos)
 	msg := bytes.NewBufferString(msgHeader)
 	if _, err := msg.Write(data); err != nil {
 		return 0, fmt.Errorf("write to pre-transmission buffer: %w", err)
@@ -101,4 +102,27 @@ func (sc *StableConn) sendData(data []byte, curPos int) (int, error) {
 	}
 
 	return sc.udpConn.WriteTo(msg.Bytes(), sc.remoteAddr)
+}
+
+type udpReader struct {
+	r io.Reader
+}
+
+func NewReader(r io.Reader) *udpReader {
+	return &udpReader{r: r}
+}
+
+// ReadMessage reads a message from the underlying UDP connection. The message is returned as a slice of strings. The first string is the message type. The remaining strings are the message parts, which vary depending on the message type.
+func (r *udpReader) ReadMessage() ([]string, error) {
+	// messages will be smaller than 1000 bytes
+	buf := make([]byte, 1000)
+	n, err := r.r.Read(buf)
+	if err != nil {
+		return nil, fmt.Errorf("r.r.Read: %w", err)
+	}
+	msg := buf[:n]
+	msgParts := strings.Split(string(msg), "/")
+	// remove first and trailing empty strings
+	msgParts = msgParts[1 : len(msgParts)-1]
+	return msgParts, nil
 }

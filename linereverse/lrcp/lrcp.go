@@ -105,22 +105,15 @@ func (l *Listener) Accept() {
 }
 
 func (l *Listener) handleConn(data []byte, remoteAddr net.Addr) error {
-	scr := bufio.NewScanner(bytes.NewBuffer(data))
-	scr.Split(ScanLRCPSection)
+	r := NewReader(bytes.NewBuffer(data))
 
 	var sc *StableConn
-	msgParts := []string{}
 
-	for scr.Scan() {
-		if scr.Err() != nil {
-			return fmt.Errorf("scan: %w", scr.Err())
+	for {
+		msgParts, err := r.ReadMessage()
+		if err != nil {
+			return fmt.Errorf("ReadMessage: %w", err)
 		}
-		part := scr.Text()
-		if part == "" {
-			continue
-		}
-
-		msgParts = append(msgParts, part)
 
 		// parse messages
 		if len(msgParts) > 1 {
@@ -142,8 +135,6 @@ func (l *Listener) handleConn(data []byte, remoteAddr net.Addr) error {
 					sc = l.sessions[sessionID]
 					l.mu.Unlock()
 
-					// Reset msg buffer
-					msgParts = []string{}
 					// Send ack
 					if err := sc.sendAck(0); err != nil {
 						return fmt.Errorf("send connect ack: %w", err)
@@ -212,7 +203,6 @@ func (l *Listener) handleConn(data []byte, remoteAddr net.Addr) error {
 		}
 	}
 
-	return nil
 }
 
 func (l *Listener) lookupSession(id string) *StableConn {

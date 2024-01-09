@@ -21,7 +21,7 @@ func main() {
 	}
 
 	address := fmt.Sprintf("%s:%s", host, port)
-	log.Printf("serving starting @: %s", address)
+	log.Printf("LRCP server starting @: %s", address)
 
 	app := linereverse.New()
 	if err := app.Run(context.TODO(), address); err != nil {

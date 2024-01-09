@@ -1,7 +1,6 @@
 package lrcp_test
 
 import (
-	"bufio"
 	"bytes"
 	"testing"
 
@@ -16,12 +15,12 @@ func TestScanLRCPSection(t *testing.T) {
 		desc      string
 	}{
 		{
-			message:   "connect/1234567/",
+			message:   `/connect/1234567/`,
 			wantParts: []string{"connect", "1234567"},
 			desc:      "Connect Message",
 		},
 		{
-			message:   "data/1234567/0/hello/",
+			message:   `/data/1234567/0/hello/`,
 			wantParts: []string{"data", "1234567", "0", "hello"},
 			desc:      "Data \"hello\" Message",
 		},
@@ -29,20 +28,12 @@ func TestScanLRCPSection(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.desc, func(t *testing.T) {
-			r := bytes.NewBufferString(tc.message)
-			scr := bufio.NewScanner(r)
+			r := lrcp.NewReader(bytes.NewBufferString(tc.message))
+			msgParts, err := r.ReadMessage()
 
-			// Split function under test
-			scr.Split(lrcp.ScanLRCPSection)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantParts, msgParts)
 
-			index := 0
-			for scr.Scan() {
-				require.NoError(t, scr.Err())
-
-				got := scr.Text()
-				require.Equal(t, tc.wantParts[index], got)
-				index++
-			}
 		})
 	}
 
