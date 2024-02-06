@@ -1,6 +1,7 @@
 package orders
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"slices"
@@ -8,26 +9,26 @@ import (
 	"strings"
 )
 
-func toyQty(in string) (int, error) {
-	parts := strings.Split(in, "x")
+func toyQty(in []byte) (int, error) {
+	parts := bytes.Split(in, []byte{'x'})
 	if len(parts) < 2 {
 		return 0, fmt.Errorf("invalid request %q", in)
 	}
 	rawQty := parts[0]
-	qty, err := strconv.Atoi(rawQty)
+	qty, err := strconv.Atoi(string(rawQty))
 	if err != nil {
 		return 0, err
 	}
 	return qty, nil
 }
 
-func MostCopies(in string) (string, error) {
-	toys := strings.Split(in, ",")
+func MostCopies(in []byte) ([]byte, error) {
+	toys := bytes.Split(in, []byte{','})
 	if len(toys) == 0 {
-		return "", nil
+		return []byte{}, nil
 	}
 	errs := []string{}
-	max := slices.MaxFunc(toys, func(a, b string) int {
+	max := slices.MaxFunc(toys, func(a, b []byte) int {
 		aQty, aErr := toyQty(a)
 		if aErr != nil {
 			errs = append(errs, aErr.Error())
@@ -41,7 +42,7 @@ func MostCopies(in string) (string, error) {
 	})
 
 	if len(errs) > 0 {
-		return "", errors.New(strings.Join(errs, ","))
+		return []byte{}, errors.New(strings.Join(errs, ","))
 	}
 	return max, nil
 }

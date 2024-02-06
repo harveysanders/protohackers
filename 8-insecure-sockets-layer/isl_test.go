@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCipher(t *testing.T) {
+func TestEncode(t *testing.T) {
 	testCases := []struct {
 		desc       string
 		cipherSpec []byte
@@ -49,10 +49,49 @@ func TestCipher(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.desc, func(t *testing.T) {
-			cipher, err := isl.NewCipher(bytes.NewReader(tc.cipherSpec))
-			require.NoError(t, err)
 
-			got := cipher.Apply(tc.input, 0)
+			cipher := isl.NewCipher()
+			n, err := cipher.ReadFrom(bytes.NewReader(tc.cipherSpec))
+			require.NoError(t, err)
+			require.Equal(t, len(tc.cipherSpec), int(n))
+
+			got := cipher.Encode(tc.input, 0)
+			require.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestDecode(t *testing.T) {
+	testCases := []struct {
+		desc       string
+		cipherSpec []byte
+		input      []byte
+		want       []byte
+	}{
+		{
+			desc: "cipher spec:  xor(123),addpos,reversebits",
+			input: []byte{
+				0xf2, 0x20, 0xba, 0x44, 0x18, 0x84, 0xba, 0xaa, 0xd0, 0x26, 0x44, 0xa4, 0xa8, 0x7e,
+			},
+			// reversebits
+			cipherSpec: []byte{
+				0x02, 0x7b, // xor(123)
+				0x05, // addpos
+				0x01, // reversebits
+				0x00, // end of cipher spec
+			},
+			want: []byte("4x dog,5x car\n"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.desc, func(t *testing.T) {
+			cipher := isl.NewCipher()
+			n, err := cipher.ReadFrom(bytes.NewReader(tc.cipherSpec))
+			require.NoError(t, err)
+			require.Equal(t, len(tc.cipherSpec), int(n))
+
+			got := cipher.Decode(tc.input, 0)
 			require.Equal(t, tc.want, got)
 		})
 	}
