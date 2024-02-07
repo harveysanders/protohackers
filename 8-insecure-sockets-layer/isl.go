@@ -25,7 +25,7 @@ var (
 	ErrAddN0             = errors.New("add(0) is invalid")
 )
 
-type Operation = func(byte, int) byte
+type Operation = func(byte, int, bool) byte
 type Cipher struct {
 	ops []Operation
 }
@@ -53,7 +53,7 @@ func (c *Cipher) ReadFrom(r io.Reader) (int64, error) {
 		case cipherEnd:
 			return nRead, nil
 		case operationReverseBits:
-			op := func(b byte, pos int) byte {
+			op := func(b byte, pos int, reverse bool) byte {
 				return byte(bits.Reverse8(uint8(b)))
 			}
 			c.ops = append(c.ops, op)
@@ -69,13 +69,13 @@ func (c *Cipher) ReadFrom(r io.Reader) (int64, error) {
 				return nRead, ErrXOR0
 			}
 			// XOR the byte by the value N.
-			op := func(b byte, pos int) byte {
+			op := func(b byte, pos int, reverse bool) byte {
 				return b ^ n
 			}
 			c.ops = append(c.ops, op)
 		case operandXORPos:
 			// XOR the byte by its position in the stream, starting from 0.
-			op := func(b byte, pos int) byte {
+			op := func(b byte, pos int, reverse bool) byte {
 				return b ^ byte(pos)
 			}
 			c.ops = append(c.ops, op)
@@ -92,12 +92,18 @@ func (c *Cipher) ReadFrom(r io.Reader) (int64, error) {
 			}
 			//  Add N to the byte, modulo 256.
 			//  Addition wraps, so that 255+1=0, 255+2=1, and so on.
-			op := func(b byte, pos int) byte {
+			op := func(b byte, pos int, reverse bool) byte {
+				if reverse {
+					return byte((uint(b) - uint(n)) % 256)
+				}
 				return byte((uint(b) + uint(n)) % 256)
 			}
 			c.ops = append(c.ops, op)
 		case operandAddPos:
-			op := func(b byte, pos int) byte {
+			op := func(b byte, pos int, reverse bool) byte {
+				if reverse {
+					return byte((uint(b) - uint(pos)) % 256)
+				}
 				return byte((uint(b) + uint(pos)) % 256)
 			}
 			c.ops = append(c.ops, op)
@@ -121,7 +127,7 @@ func (c Cipher) Encode(in []byte, streamPos int) []byte {
 	_ = copy(out, in)
 	for _, op := range c.ops {
 		for bytePos, b := range out {
-			out[bytePos] = op(b, streamPos+bytePos)
+			out[bytePos] = op(b, streamPos+bytePos, false)
 		}
 	}
 	return out
@@ -134,7 +140,7 @@ func (c Cipher) Decode(in []byte, streamPos int) []byte {
 	for i := len(c.ops) - 1; i >= 0; i-- {
 		op := c.ops[i]
 		for bytePos, b := range out {
-			out[bytePos] = op(b, streamPos+bytePos)
+			out[bytePos] = op(b, streamPos+bytePos, true)
 		}
 	}
 	return out
@@ -157,10 +163,10 @@ func NewStreamDecoder(r io.Reader, c Cipher, pos int) *StreamDecoder {
 func (s *StreamDecoder) Read(p []byte) (int, error) {
 	buf := make([]byte, len(p))
 	n, err := s.encrypted.Read(buf)
-	s.pos += n
 	if n > 0 {
 		decrypted := s.cipher.Decode(buf[:n], s.pos)
 		_ = copy(p, decrypted)
+		s.pos += n
 		return n, err
 	}
 	return 0, io.EOF

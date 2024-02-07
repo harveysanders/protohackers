@@ -69,7 +69,7 @@ func TestDecode(t *testing.T) {
 		want       []byte
 	}{
 		{
-			desc: "cipher spec:  xor(123),addpos,reversebits",
+			desc: "cipher spec: xor(123),addpos,reversebits",
 			input: []byte{
 				0xf2, 0x20, 0xba, 0x44, 0x18, 0x84, 0xba, 0xaa, 0xd0, 0x26, 0x44, 0xa4, 0xa8, 0x7e,
 			},

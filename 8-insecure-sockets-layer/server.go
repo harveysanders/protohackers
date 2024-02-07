@@ -67,13 +67,15 @@ func handleConnection(ctx context.Context, conn net.Conn) {
 		fmt.Printf("io.CopyN: %v", err)
 		return
 	}
-	sd := NewStreamDecoder(buf, *cip, int(nRead))
+
+	// Stream start pos begins after cipher spec
+	sd := NewStreamDecoder(buf, *cip, 0)
 
 	scr := bufio.NewScanner(sd)
 	for scr.Scan() {
 		line := scr.Bytes()
 		toy, err := orders.MostCopies(line)
-		log.Print(toy)
+		log.Print(string(toy))
 		if err != nil {
 			fmt.Printf("orders.MostCopies: %v", err)
 			return
