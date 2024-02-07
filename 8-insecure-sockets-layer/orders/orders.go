@@ -9,6 +9,13 @@ import (
 	"strings"
 )
 
+// toyQty takes an ASCII line of a toy and returns the
+// quantity of toys to make.
+//
+// Ex:
+//
+//	line:= []byte("10x toy car")
+//	toyQty(line) => 10
 func toyQty(in []byte) (int, error) {
 	parts := bytes.Split(in, []byte{'x'})
 	if len(parts) < 2 {
@@ -22,6 +29,14 @@ func toyQty(in []byte) (int, error) {
 	return qty, nil
 }
 
+// MostCopies takes and ASCII line of a comma-separated
+// list of toys to make and returns the toy with the
+// most copies to make.
+//
+// Ex:
+//
+//	line:= []byte("10x toy car,15x dog on a string,4x inflatable motorcycle\n"
+//	MostCopies(line) => []byte("15x dog on a string\n")
 func MostCopies(in []byte) ([]byte, error) {
 	toys := bytes.Split(in, []byte{','})
 	if len(toys) == 0 {

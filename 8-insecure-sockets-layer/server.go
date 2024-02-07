@@ -47,42 +47,51 @@ func (s *Server) Address() string {
 
 func handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
+	const maxMessageLen = 5000
 	var (
-		nRead    int
-		nWritten int
+		nRead    int // Total bytes read from the stream, not including the cipher spec.
+		nWritten int // Total bytes written to the stream.
 	)
-	buf := bytes.NewBuffer(make([]byte, 0, 5000))
-	tr := io.TeeReader(conn, buf)
-	// Read cipher spec
-	cip := NewCipher()
-	n, err := cip.ReadFrom(tr)
+
+	connBuf := bytes.NewBuffer(make([]byte, 0, maxMessageLen))
+	// Split the stream into two readers so we can read the cipher spec
+	// and then decode the rest of the stream.
+	// The cipher spec has an unknown length, so we can't use a fixed size buffer. If we reused the same reader passed to cipherSpec.ReadFrom,
+	// We may read past the end of the cipher spec and into the message.
+	// TODO: There may be a more efficient way to do this.
+	tr := io.TeeReader(conn, connBuf)
+	cipherSpec := NewCipher()
+	n, err := cipherSpec.ReadFrom(tr)
 	if err != nil {
 		fmt.Printf("newCipher: %v", err)
 		return
 	}
 
-	// Discard cipher spec
-	_, err = io.CopyN(io.Discard, buf, n)
+	// Discard cipher spec from the connection buffer,
+	// since we've already read it from the tee reader.
+	_, err = io.CopyN(io.Discard, connBuf, n)
 	if err != nil {
 		fmt.Printf("io.CopyN: %v", err)
 		return
 	}
 
-	// Stream start pos begins after cipher spec
-	sd := NewStreamDecoder(buf, *cip, nRead)
-
+	// Stream start pos begins immediately after cipher spec.
+	// nRead is 0 at this point.
+	sd := NewStreamDecoder(connBuf, *cipherSpec, nRead)
 	scr := bufio.NewScanner(sd)
+
 	for scr.Scan() {
 		line := scr.Bytes()
-		nRead += len(line) + 1 // Add 1 for newline
+		// Re add the newline stripped by the scanner
+		line = append(line, '\n')
+		nRead += len(line)
 		toy, err := orders.MostCopies(line)
 		if err != nil {
 			fmt.Printf("orders.MostCopies: %v", err)
 			return
 		}
 
-		resp := append(toy, '\n')
-		encoded := cip.Encode(resp, nWritten)
+		encoded := cipherSpec.Encode(toy, nWritten)
 		n, err := conn.Write(encoded)
 		nWritten += n
 		if err != nil {

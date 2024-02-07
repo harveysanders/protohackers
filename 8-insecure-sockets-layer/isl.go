@@ -9,14 +9,14 @@ import (
 )
 
 const (
-	cipherEnd            = 0x00
-	operationReverseBits = 0x01
-	operandXORN          = 0x02
-	operandXORPos        = 0x03
-	operandAddN          = 0x04
-	operandAddPos        = 0x05
+	cipherEnd            = 0x00 // End of cipher spec.
+	operationReverseBits = 0x01 // Reverse the bits of the byte.
+	operationXORN        = 0x02 // XOR the byte by N.
+	operationXORPos      = 0x03 // XOR the byte by its position in the stream.
+	operationAddN        = 0x04 // Add N to the byte. If decoding, subtract N from the byte.
+	operationAddPos      = 0x05 // Add the position in the stream to the byte. If decoding, subtract the position from the byte.
 
-	MaxSpecLen = 80
+	MaxSpecLen = 80 // Maximum length of the cipher spec.
 )
 
 var (
@@ -57,7 +57,7 @@ func (c *Cipher) ReadFrom(r io.Reader) (int64, error) {
 				return byte(bits.Reverse8(uint8(b)))
 			}
 			c.ops = append(c.ops, op)
-		case operandXORN:
+		case operationXORN:
 			n, err := rdr.ReadByte()
 			if err != nil {
 				return nRead, fmt.Errorf("operandXORN ReadByte(): %w", err)
@@ -73,13 +73,13 @@ func (c *Cipher) ReadFrom(r io.Reader) (int64, error) {
 				return b ^ n
 			}
 			c.ops = append(c.ops, op)
-		case operandXORPos:
+		case operationXORPos:
 			// XOR the byte by its position in the stream, starting from 0.
 			op := func(b byte, pos int, reverse bool) byte {
 				return b ^ byte(pos)
 			}
 			c.ops = append(c.ops, op)
-		case operandAddN:
+		case operationAddN:
 			n, err := rdr.ReadByte()
 			if err != nil {
 				return nRead, fmt.Errorf("operandAddN ReadByte: %w", err)
@@ -99,7 +99,7 @@ func (c *Cipher) ReadFrom(r io.Reader) (int64, error) {
 				return byte((uint(b) + uint(n)) % 256)
 			}
 			c.ops = append(c.ops, op)
-		case operandAddPos:
+		case operationAddPos:
 			op := func(b byte, pos int, reverse bool) byte {
 				if reverse {
 					return byte((uint(b) - uint(pos)) % 256)
