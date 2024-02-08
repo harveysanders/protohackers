@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 
 	isl "github.com/harveysanders/protohackers/8-insecure-sockets-layer"
 	"github.com/stretchr/testify/require"
@@ -117,6 +118,56 @@ func TestServer(t *testing.T) {
 			require.ErrorIs(t, io.EOF, err, "expected to immediately close connection")
 		}
 
+		_ = conn.Close()
+		_ = server.Stop()
+		wg.Wait()
+	})
+
+	t.Run("handles slow clients", func(t *testing.T) {
+		t.Skip("TODO: Fix me")
+
+		var wg sync.WaitGroup
+		port := "9999"
+		server := isl.Server{}
+		err := server.Start(port)
+		require.NoError(t, err)
+		ctx := context.Background()
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			err := server.Serve(ctx)
+			if err != nil {
+				t.Logf("server.Serve(): %v", err)
+				return
+			}
+		}()
+
+		conn, err := net.Dial("tcp", server.Address())
+		require.NoError(t, err)
+
+		msgs := [][]byte{
+			// xor(123),addpos,reversebits
+			{0x02, 0x7b, 0x05, 0x01, 0x00},
+			// 4x dog,5x car\n
+			{0xf2, 0x20, 0xba, 0x44, 0x18, 0x84, 0xba, 0xaa, 0xd0, 0x26, 0x44, 0xa4, 0xa8, 0x7e},
+		}
+
+		for _, m := range msgs {
+			_, err := conn.Write(m)
+			require.NoError(t, err)
+			time.Sleep(500 * time.Millisecond)
+		}
+
+		resp := make([]byte, 5000)
+		n, err := conn.Read(resp)
+		require.NotErrorIs(t, io.EOF, err)
+
+		wantResp := []byte{0x72, 0x20, 0xba, 0xd8, 0x78, 0x70, 0xee}
+		require.Equal(t, wantResp, resp[:n])
+
+		// Close the connection before reading the response
 		_ = conn.Close()
 		_ = server.Stop()
 		wg.Wait()

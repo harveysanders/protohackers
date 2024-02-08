@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"time"
 )
 
 const (
@@ -17,7 +18,8 @@ const (
 	operationAddN        = 0x04 // Add N to the byte. If decoding, subtract N from the byte.
 	operationAddPos      = 0x05 // Add the position in the stream to the byte. If decoding, subtract the position from the byte.
 
-	MaxSpecLen = 80 // Maximum length of the cipher spec.
+	MaxSpecLen    = 80  // Maximum length of the cipher spec.
+	maxEmptyReads = 100 // Maximum number of empty reads before returning EOF.
 )
 
 var (
@@ -164,27 +166,36 @@ func (c *Cipher) IsNoOp() bool {
 }
 
 type StreamDecoder struct {
-	encrypted io.Reader
-	cipher    Cipher
-	pos       int
+	encoded    io.Reader
+	cipher     Cipher
+	pos        int
+	emptyReads int
 }
 
 func NewStreamDecoder(r io.Reader, c Cipher, pos int) *StreamDecoder {
 	return &StreamDecoder{
-		encrypted: r,
-		cipher:    c,
-		pos:       pos,
+		encoded: r,
+		cipher:  c,
+		pos:     pos,
 	}
 }
 
 func (s *StreamDecoder) Read(p []byte) (int, error) {
 	buf := make([]byte, len(p))
-	n, err := s.encrypted.Read(buf)
-	if n > 0 {
-		decrypted := s.cipher.Decode(buf[:n], s.pos)
-		_ = copy(p, decrypted)
-		s.pos += n
-		return n, err
+	for {
+		n, err := s.encoded.Read(buf)
+		if n > 0 {
+			s.emptyReads = 0
+			decoded := s.cipher.Decode(buf[:n], s.pos)
+			_ = copy(p, decoded)
+			s.pos += n
+			return n, err
+		}
+		// Empty read
+		s.emptyReads++
+		if s.emptyReads > maxEmptyReads {
+			return 0, io.EOF
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
-	return 0, io.EOF
 }
