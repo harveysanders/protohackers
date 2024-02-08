@@ -30,14 +30,17 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) Serve(ctx context.Context) error {
+	fmt.Printf("Server listening on %s\n", s.Address())
+	clientID := 0
 	for {
+		clientID++
 		conn, err := s.l.Accept()
 		if err != nil {
 			log.Print("Client connection closed\n")
 			return nil
 		}
 
-		go handleConnection(ctx, conn)
+		go handleConnection(ctx, conn, clientID)
 	}
 }
 
@@ -45,8 +48,11 @@ func (s *Server) Address() string {
 	return s.l.Addr().String()
 }
 
-func handleConnection(ctx context.Context, conn net.Conn) {
-	defer conn.Close()
+func handleConnection(ctx context.Context, conn net.Conn, clientID int) {
+	defer func() {
+		fmt.Printf("[%d]: handler complete\n", clientID)
+		conn.Close()
+	}()
 	const maxMessageLen = 5000
 	var (
 		nRead    int // Total bytes read from the stream, not including the cipher spec.
@@ -63,6 +69,10 @@ func handleConnection(ctx context.Context, conn net.Conn) {
 	cipherSpec := NewCipher()
 	n, err := cipherSpec.ReadFrom(tr)
 	if err != nil {
+		if err == ErrNoOpCipher {
+			fmt.Printf("cipher spec is a no-op")
+			return
+		}
 		fmt.Printf("newCipher: %v", err)
 		return
 	}
@@ -82,6 +92,7 @@ func handleConnection(ctx context.Context, conn net.Conn) {
 
 	for scr.Scan() {
 		line := scr.Bytes()
+		fmt.Printf("[%d]: Received: %s\n", clientID, string(line))
 		// Re add the newline stripped by the scanner
 		line = append(line, '\n')
 		nRead += len(line)
@@ -91,6 +102,7 @@ func handleConnection(ctx context.Context, conn net.Conn) {
 			return
 		}
 
+		fmt.Printf("[%d]: Sending: %s\n", clientID, string(toy))
 		encoded := cipherSpec.Encode(toy, nWritten)
 		n, err := conn.Write(encoded)
 		nWritten += n

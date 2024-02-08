@@ -2,6 +2,7 @@ package isl
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ var (
 	ErrMaxCipherSpecSize = errors.New("maximum cipher spec size exceeded")
 	ErrXOR0              = errors.New("xor(0) is invalid")
 	ErrAddN0             = errors.New("add(0) is invalid")
+	ErrNoOpCipher        = errors.New("cipher spec is a no-op")
 )
 
 type Operation = func(byte, int, bool) byte
@@ -38,7 +40,7 @@ func (c *Cipher) ReadFrom(r io.Reader) (int64, error) {
 	rdr := bufio.NewReader(r)
 	var err error
 	var nRead int64
-	for _, err = rdr.Peek(1); err == nil; {
+	for _, err := rdr.Peek(1); err == nil; {
 		if nRead > MaxSpecLen {
 			return nRead, ErrMaxCipherSpecSize
 		}
@@ -51,6 +53,10 @@ func (c *Cipher) ReadFrom(r io.Reader) (int64, error) {
 		nRead += 1
 		switch b {
 		case cipherEnd:
+			// Check for a noop cipher spec.
+			if c.IsNoOp() {
+				return nRead, ErrNoOpCipher
+			}
 			return nRead, nil
 		case operationReverseBits:
 			op := func(b byte, pos int, reverse bool) byte {
@@ -112,6 +118,9 @@ func (c *Cipher) ReadFrom(r io.Reader) (int64, error) {
 	if err != io.EOF {
 		return nRead, err
 	}
+
+	// We should never reach this point because the loop should always
+	// return on encountering a cipherEnd byte.
 	return nRead, nil
 }
 
@@ -144,6 +153,14 @@ func (c Cipher) Decode(in []byte, streamPos int) []byte {
 		}
 	}
 	return out
+}
+
+// IsNoOp returns true if the cipher spec leaves every byte unchanged, e.g. no-op.
+func (c *Cipher) IsNoOp() bool {
+	// "hello world\n"
+	sample := []byte{0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64, 0x0a}
+	encoded := c.Encode(sample, 0)
+	return bytes.Equal(sample, encoded)
 }
 
 type StreamDecoder struct {
