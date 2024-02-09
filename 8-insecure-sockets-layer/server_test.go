@@ -115,7 +115,7 @@ func TestServer(t *testing.T) {
 			resp := make([]byte, 5000)
 			n, err := conn.Read(resp)
 			require.Equal(t, 0, n, "expected no data in response")
-			require.ErrorIs(t, io.EOF, err, "expected to immediately close connection")
+			require.ErrorContains(t, err, "reset", "expected to immediately close connection")
 		}
 
 		_ = conn.Close()
@@ -124,10 +124,8 @@ func TestServer(t *testing.T) {
 	})
 
 	t.Run("handles slow clients", func(t *testing.T) {
-		t.Skip("TODO: Fix me")
-
 		var wg sync.WaitGroup
-		port := "9999"
+		port := ""
 		server := isl.Server{}
 		err := server.Start(port)
 		require.NoError(t, err)

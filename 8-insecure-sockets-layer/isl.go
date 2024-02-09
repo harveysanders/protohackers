@@ -39,20 +39,23 @@ type Cipher struct {
 // operations to apply to a byte stream.
 // An error is returned for an invalid spec.
 func (c *Cipher) ReadFrom(r io.Reader) (int64, error) {
-	rdr := bufio.NewReader(r)
 	var err error
 	var nRead int64
-	for _, err := rdr.Peek(1); err == nil; {
-		if nRead > MaxSpecLen {
-			return nRead, ErrMaxCipherSpecSize
-		}
 
+	header, err := readToDelimiter(r, cipherEnd)
+	nRead += int64(len(header))
+	if err != nil {
+		return nRead, fmt.Errorf("rdr.ReadBytes: %w", err)
+	}
+
+	rdr := bufio.NewReaderSize(bytes.NewReader(header), len(header))
+
+	for {
 		b, err := rdr.ReadByte()
 		if err != nil {
 			// Should never be EOF because of the Peek call above
-			return 0, fmt.Errorf("rdr.ReadByte(): %w", err)
+			return nRead, fmt.Errorf("rdr.ReadByte(): %w", err)
 		}
-		nRead += 1
 		switch b {
 		case cipherEnd:
 			// Check for a noop cipher spec.
@@ -71,7 +74,6 @@ func (c *Cipher) ReadFrom(r io.Reader) (int64, error) {
 				return nRead, fmt.Errorf("operandXORN ReadByte(): %w", err)
 			}
 
-			nRead += 1
 			// Note that 0 is a valid value for N
 			if n == 0 {
 				return nRead, ErrXOR0
@@ -93,7 +95,6 @@ func (c *Cipher) ReadFrom(r io.Reader) (int64, error) {
 				return nRead, fmt.Errorf("operandAddN ReadByte: %w", err)
 			}
 
-			nRead += 1
 			// Note that 0 is a valid value for N
 			if n == 0 {
 				return nRead, ErrAddN0
@@ -117,13 +118,6 @@ func (c *Cipher) ReadFrom(r io.Reader) (int64, error) {
 			c.ops = append(c.ops, op)
 		}
 	}
-	if err != io.EOF {
-		return nRead, err
-	}
-
-	// We should never reach this point because the loop should always
-	// return on encountering a cipherEnd byte.
-	return nRead, nil
 }
 
 // NewCipher creates a Cipher.
@@ -196,6 +190,31 @@ func (s *StreamDecoder) Read(p []byte) (int, error) {
 		if s.emptyReads > maxEmptyReads {
 			return 0, io.EOF
 		}
+		if err != nil {
+			return 0, err
+		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func readToDelimiter(r io.Reader, delim byte) ([]byte, error) {
+	nRead := 0
+
+	buf := make([]byte, 1)
+	var results []byte
+	for {
+		n, err := r.Read(buf)
+		nRead += n
+		if nRead > MaxSpecLen {
+			return nil, ErrMaxCipherSpecSize
+		}
+
+		if err != nil {
+			return nil, err
+		}
+		if buf[0] == delim {
+			return append(results, buf[0]), nil
+		}
+		results = append(results, buf[0])
 	}
 }

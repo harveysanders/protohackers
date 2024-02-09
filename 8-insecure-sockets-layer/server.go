@@ -2,10 +2,8 @@ package isl
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"net"
 
@@ -59,15 +57,9 @@ func handleConnection(ctx context.Context, conn net.Conn, clientID int) {
 		nWritten int // Total bytes written to the stream.
 	)
 
-	connBuf := bytes.NewBuffer(make([]byte, 0, maxMessageLen))
-	// Split the stream into two readers so we can read the cipher spec
-	// and then decode the rest of the stream.
-	// The cipher spec has an unknown length, so we can't use a fixed size buffer. If we reused the same reader passed to cipherSpec.ReadFrom,
-	// We may read past the end of the cipher spec and into the message.
-	// TODO: There may be a more efficient way to do this.
-	tr := io.TeeReader(conn, connBuf)
 	cipherSpec := NewCipher()
-	n, err := cipherSpec.ReadFrom(tr)
+	n, err := cipherSpec.ReadFrom(conn)
+	fmt.Printf("read %d bytes from cipher spec\n", n)
 	if err != nil {
 		if err == ErrNoOpCipher {
 			fmt.Printf("cipher spec is a no-op")
@@ -77,18 +69,11 @@ func handleConnection(ctx context.Context, conn net.Conn, clientID int) {
 		return
 	}
 
-	// Discard cipher spec from the connection buffer,
-	// since we've already read it from the tee reader.
-	_, err = io.CopyN(io.Discard, connBuf, n)
-	if err != nil {
-		fmt.Printf("io.CopyN: %v", err)
-		return
-	}
-
 	// Stream start pos begins immediately after cipher spec.
 	// nRead is 0 at this point.
-	sd := NewStreamDecoder(connBuf, *cipherSpec, nRead)
+	sd := NewStreamDecoder(conn, *cipherSpec, nRead)
 	scr := bufio.NewScanner(sd)
+	scr.Buffer(make([]byte, maxMessageLen), maxMessageLen)
 
 	for scr.Scan() {
 		line := scr.Bytes()
