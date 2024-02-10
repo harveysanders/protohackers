@@ -87,6 +87,7 @@ func handleConnection(ctx context.Context, conn net.Conn, clientID int) {
 			return
 		}
 
+		toy = append(toy, '\n')
 		fmt.Printf("[%d]: Sending: %s\n", clientID, string(toy))
 		encoded := cipherSpec.Encode(toy, nWritten)
 		n, err := conn.Write(encoded)
