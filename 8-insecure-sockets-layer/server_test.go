@@ -1,6 +1,7 @@
 package isl_test
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net"
@@ -170,4 +171,70 @@ func TestServer(t *testing.T) {
 		_ = server.Stop()
 		wg.Wait()
 	})
+}
+
+func TestServerEdgeCases(t *testing.T) {
+	t.Skip("fix wait group")
+
+	var wg sync.WaitGroup
+	port := ""
+	server := isl.Server{}
+	err := server.Start(port)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		err := server.Serve(ctx)
+		if err != nil {
+			t.Logf("server.Serve(): %v", err)
+			return
+		}
+	}()
+
+	conn, err := net.Dial("tcp", server.Address())
+	require.NoError(t, err)
+
+	msgs := [][]byte{
+		edgeCase1.cipherSpec,
+		edgeCase1.reqs[0],
+		edgeCase1.reqs[1],
+	}
+
+	expectedResponseCount := 2
+	wg.Add(expectedResponseCount)
+	go func(t *testing.T, conn net.Conn, wg *sync.WaitGroup) {
+		readPump(t, conn, wg)
+		server.Stop()
+	}(t, conn, &wg)
+
+	for _, msg := range msgs {
+		nSent, err := conn.Write(msg)
+		require.NoError(t, err)
+		require.Greater(t, nSent, 0)
+	}
+
+	wg.Wait()
+	conn.Close()
+}
+
+func readPump(t *testing.T, conn net.Conn, wg *sync.WaitGroup) {
+	t.Helper()
+	c := isl.NewCipher()
+	c.ReadFrom(bytes.NewReader(edgeCase1.cipherSpec))
+	var nRead int
+	for {
+		resp := make([]byte, 5000)
+		nRecv, err := conn.Read(resp)
+		t.Logf("readPump: received %d bytes", nRecv)
+		require.NotErrorIs(t, io.EOF, err)
+
+		t.Logf("readPump: raw response: %s", resp[:nRecv])
+		decoded := c.Decode(resp[:nRecv], nRead)
+		t.Logf("readPump: decoded: %s", decoded)
+		nRead += nRecv
+		wg.Done()
+	}
 }

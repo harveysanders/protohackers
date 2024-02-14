@@ -34,7 +34,7 @@ func (s *Server) Serve(ctx context.Context) error {
 		clientID++
 		conn, err := s.l.Accept()
 		if err != nil {
-			log.Print("Client connection closed\n")
+			log.Printf("[%d]: Client connection closed\n", clientID)
 			return nil
 		}
 
@@ -59,7 +59,7 @@ func handleConnection(ctx context.Context, conn net.Conn, clientID int) {
 
 	cipherSpec := NewCipher()
 	n, err := cipherSpec.ReadFrom(conn)
-	fmt.Printf("read %d bytes from cipher spec\n", n)
+	fmt.Printf("[%d]: read %d bytes from cipher spec\n", clientID, n)
 	if err != nil {
 		if err == ErrNoOpCipher {
 			fmt.Printf("cipher spec is a no-op")
@@ -77,13 +77,19 @@ func handleConnection(ctx context.Context, conn net.Conn, clientID int) {
 
 	for scr.Scan() {
 		line := scr.Bytes()
-		fmt.Printf("[%d]: Received: %s\n", clientID, string(line))
+		if len(line) >= 30 {
+			fmt.Printf("[%d]: Received: %s\n", clientID, string(line[:30])+`...`)
+		} else {
+			fmt.Printf("[%d]: Received: %s\n", clientID, string(line))
+		}
 		// Re add the newline stripped by the scanner
 		line = append(line, '\n')
 		nRead += len(line)
+		fmt.Printf("[%d]: nRead: %9d\n", clientID, nRead)
+		fmt.Printf("[%d]: message len: %1d\n\n", clientID, len(line))
 		toy, err := orders.MostCopies(line)
 		if err != nil {
-			fmt.Printf("orders.MostCopies: %v", err)
+			fmt.Printf("[%d]: orders.MostCopies: %v\n", clientID, err)
 			return
 		}
 
@@ -102,4 +108,6 @@ func handleConnection(ctx context.Context, conn net.Conn, clientID int) {
 		fmt.Printf("scr.Err(): %v", err)
 		return
 	}
+
+	fmt.Printf("[%d]: scan loop complete\n", clientID)
 }
