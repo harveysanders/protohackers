@@ -1,4 +1,5 @@
-package queue
+// Package inmem provides an in-memory implementation of the job queues store.
+package inmem
 
 import (
 	"context"
@@ -26,15 +27,19 @@ const (
 type job struct {
 	ID      uint64          // Unique identifier.
 	Pri     int64           // Priority. Higher value has higher priority.
-	state   jobState        // Current status of the job.
 	Payload json.RawMessage // JSON serialized data associated with job
+
+	state    jobState // Current status of the job.
+	workerID *int     // ID of the worker that has been assigned the job, nil if not assigned.
 }
 
 type Store struct {
-	qMu    *sync.Mutex      // Protects the queues map.
-	queues map[string][]job // Job queues mapped to queue names. In each queue. jobs are sorted in ascending priority order.
-	idMu   *sync.Mutex      // Protect ID incrementor.
-	curID  uint64           // Next available ID.
+	qMu      *sync.Mutex      // Protects the queues map.
+	queues   map[string][]job // Queues of available jobs mapped to queue names. In each queue. jobs are sorted in ascending priority order.
+	assigned map[int64]job    // Jobs assigned to workers. Key is worker ID, value is job.
+	deleted  map[int64]job    // Deleted job. These jobs can not be reassigned. Key is worker ID, value is job.
+	idMu     *sync.Mutex      // Protect ID incrementor.
+	curID    uint64           // Next available ID.
 }
 
 func NewQueue() *Store {
