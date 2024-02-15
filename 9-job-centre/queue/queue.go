@@ -22,6 +22,7 @@ const (
 	JobStateAborted                    // Job aborted. Once a job is aborted, it can be reassigned to any client. Jobs are automatically aborted when that client disconnects.
 )
 
+// job represents a job in a queue.
 type job struct {
 	ID      uint64          // Unique identifier.
 	Pri     int64           // Priority. Higher value has higher priority.
@@ -29,33 +30,35 @@ type job struct {
 	Payload json.RawMessage // JSON serialized data associated with job
 }
 
-type Queue struct {
-	jobsMu *sync.Mutex      // Protects the jobs map.
-	jobs   map[string][]job // Internal jobs store. Jobs are sorted in ascending priority order.
-	idMu   *sync.Mutex      // Protect ID incrementor
+type Store struct {
+	qMu    *sync.Mutex      // Protects the queues map.
+	queues map[string][]job // Job queues mapped to queue names. In each queue. jobs are sorted in ascending priority order.
+	idMu   *sync.Mutex      // Protect ID incrementor.
 	curID  uint64           // Next available ID.
 }
 
-func NewQueue() *Queue {
-	return &Queue{
+func NewQueue() *Store {
+	return &Store{
 		idMu:   &sync.Mutex{},
-		jobsMu: &sync.Mutex{},
-		jobs:   make(map[string][]job),
+		qMu:    &sync.Mutex{},
+		queues: make(map[string][]job),
 		curID:  10000,
 	}
 }
 
-func (q *Queue) nextID() uint64 {
+// nextID returns the next available ID.
+func (q *Store) nextID() uint64 {
 	q.idMu.Lock()
 	q.curID += 1
 	q.idMu.Unlock()
 	return q.curID
 }
 
-func (q *Queue) Insert(ctx context.Context, queueName string, pri int64, payload json.RawMessage) error {
+// AddJob adds a job to the named queue.
+func (q *Store) AddJob(ctx context.Context, queueName string, pri int64, payload json.RawMessage) error {
 	id := q.nextID()
-	q.jobsMu.Lock()
-	defer q.jobsMu.Unlock()
+	q.qMu.Lock()
+	defer q.qMu.Unlock()
 
 	newJob := job{
 		ID:      id,
@@ -64,9 +67,9 @@ func (q *Queue) Insert(ctx context.Context, queueName string, pri int64, payload
 		state:   JobStateUnAssigned,
 	}
 
-	curQ, ok := q.jobs[queueName]
+	curQ, ok := q.queues[queueName]
 	if !ok {
-		q.jobs[queueName] = []job{newJob}
+		q.queues[queueName] = []job{newJob}
 		return nil
 	}
 
@@ -81,12 +84,12 @@ func (q *Queue) Insert(ctx context.Context, queueName string, pri int64, payload
 		curQ = slices.Insert(curQ, index, newJob)
 	}
 
-	q.jobs[queueName] = curQ
+	q.queues[queueName] = curQ
 	return nil
 }
 
-// Get retrieves the highest priority job of all the named queues.
-func (q *Queue) Get(ctx context.Context, queueNames []string) (job, error) {
+// NextJob retrieves the highest priority job of all the named queues.
+func (q *Store) NextJob(ctx context.Context, queueNames []string) (job, error) {
 	highestPriJob := job{Pri: math.MinInt64}
 	for _, name := range queueNames {
 		j, err := q.nextJob(ctx, name)
@@ -104,10 +107,11 @@ func (q *Queue) Get(ctx context.Context, queueNames []string) (job, error) {
 	return highestPriJob, nil
 }
 
-func (q *Queue) nextJob(ctx context.Context, queueName string) (job, error) {
-	q.jobsMu.Lock()
-	defer q.jobsMu.Unlock()
-	curQ, ok := q.jobs[queueName]
+// nextJob retrieves the highest priority job of the named queue.
+func (q *Store) nextJob(ctx context.Context, queueName string) (job, error) {
+	q.qMu.Lock()
+	defer q.qMu.Unlock()
+	curQ, ok := q.queues[queueName]
 	if !ok {
 		return job{}, ErrNoJob
 	}

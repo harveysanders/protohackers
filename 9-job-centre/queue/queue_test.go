@@ -35,7 +35,7 @@ func TestInsert(t *testing.T) {
 	ctx := context.Background()
 	q := queue.NewQueue()
 	for _, ti := range toInsert {
-		err := q.Insert(ctx, ti.queueName, ti.pri, ti.payload)
+		err := q.AddJob(ctx, ti.queueName, ti.pri, ti.payload)
 		require.NoError(t, err)
 	}
 }
@@ -44,10 +44,10 @@ func TestGet(t *testing.T) {
 	t.Run("one job", func(t *testing.T) {
 		ctx := context.Background()
 		q := queue.NewQueue()
-		err := q.Insert(ctx, "test", 1, json.RawMessage(`{"test": "test"}`))
+		err := q.AddJob(ctx, "test", 1, json.RawMessage(`{"test": "test"}`))
 		require.NoError(t, err)
 
-		j, err := q.Get(ctx, []string{"test"})
+		j, err := q.NextJob(ctx, []string{"test"})
 		require.NoError(t, err)
 		require.Equal(t, int64(1), j.Pri)
 	})
@@ -56,13 +56,13 @@ func TestGet(t *testing.T) {
 		ctx := context.Background()
 		q := queue.NewQueue()
 
-		err := q.Insert(ctx, "queue1", 1, json.RawMessage(`{"test": "test"}`))
+		err := q.AddJob(ctx, "queue1", 1, json.RawMessage(`{"test": "test"}`))
 		require.NoError(t, err)
 
-		err = q.Insert(ctx, "queue1", 2, json.RawMessage(`{"test": "test"}`))
+		err = q.AddJob(ctx, "queue1", 2, json.RawMessage(`{"test": "test"}`))
 		require.NoError(t, err)
 
-		j, err := q.Get(ctx, []string{"queue1"})
+		j, err := q.NextJob(ctx, []string{"queue1"})
 		require.NoError(t, err)
 		require.Equal(t, int64(2), j.Pri)
 	})
