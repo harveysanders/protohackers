@@ -60,7 +60,7 @@ func (q *Store) nextID() uint64 {
 }
 
 // AddJob adds a job to the named queue.
-func (q *Store) AddJob(ctx context.Context, queueName string, pri int64, payload json.RawMessage) error {
+func (q *Store) AddJob(ctx context.Context, userID int64, queueName string, pri int64, payload json.RawMessage) error {
 	id := q.nextID()
 	q.qMu.Lock()
 	defer q.qMu.Unlock()
@@ -94,7 +94,7 @@ func (q *Store) AddJob(ctx context.Context, queueName string, pri int64, payload
 }
 
 // NextJob retrieves the highest priority job of all the named queues.
-func (q *Store) NextJob(ctx context.Context, queueNames []string) (job, error) {
+func (q *Store) NextJob(ctx context.Context, userID int64, queueNames []string) (job, error) {
 	highestPriJob := job{Pri: math.MinInt64}
 	for _, name := range queueNames {
 		j, err := q.nextJob(ctx, name)
