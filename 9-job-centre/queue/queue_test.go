@@ -39,3 +39,31 @@ func TestInsert(t *testing.T) {
 		require.NoError(t, err)
 	}
 }
+
+func TestGet(t *testing.T) {
+	t.Run("one job", func(t *testing.T) {
+		ctx := context.Background()
+		q := queue.NewQueue()
+		err := q.Insert(ctx, "test", 1, json.RawMessage(`{"test": "test"}`))
+		require.NoError(t, err)
+
+		j, err := q.Get(ctx, []string{"test"})
+		require.NoError(t, err)
+		require.Equal(t, int64(1), j.Pri)
+	})
+
+	t.Run("multiple jobs", func(t *testing.T) {
+		ctx := context.Background()
+		q := queue.NewQueue()
+
+		err := q.Insert(ctx, "queue1", 1, json.RawMessage(`{"test": "test"}`))
+		require.NoError(t, err)
+
+		err = q.Insert(ctx, "queue1", 2, json.RawMessage(`{"test": "test"}`))
+		require.NoError(t, err)
+
+		j, err := q.Get(ctx, []string{"queue1"})
+		require.NoError(t, err)
+		require.Equal(t, int64(2), j.Pri)
+	})
+}
