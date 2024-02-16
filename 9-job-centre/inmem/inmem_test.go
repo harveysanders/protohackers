@@ -212,3 +212,83 @@ func TestDelete(t *testing.T) {
 	})
 
 }
+
+func TestAbortJob(t *testing.T) {
+	t.Run("Aborted jobs should be returned to the queue", func(t *testing.T) {
+		jobs := []testJob{
+			{
+				queueName: "q1",
+				pri:       256,
+			},
+			{
+				queueName: "q1",
+				pri:       512,
+			},
+		}
+
+		ctx := context.Background()
+		clientID := uint64(123)
+		q := inmem.NewQueue()
+
+		for _, job := range jobs {
+			_, err := q.AddJob(ctx, clientID, job.queueName, job.pri, job.payload)
+			require.NoError(t, err)
+		}
+
+		j, queueName, err := q.NextJob(ctx, clientID, []string{"q1"})
+		require.NoError(t, err)
+		require.Equal(t, "q1", queueName)
+		require.Equal(t, int64(512), j.Pri)
+
+		err = q.AbortJob(ctx, clientID, j.ID)
+		require.NoError(t, err)
+
+		j, queueName, err = q.NextJob(ctx, clientID, []string{"q1"})
+		require.NoError(t, err)
+		require.Equal(t, "q1", queueName)
+		require.Equal(t, int64(512), j.Pri)
+	})
+
+	t.Run("Abort assigned job", func(t *testing.T) {
+		ctx := context.Background()
+		clientID := uint64(123)
+		q := inmem.NewQueue()
+		_, err := q.AddJob(ctx, clientID, "test", 1, json.RawMessage(`{"test": "test"}`))
+		require.NoError(t, err)
+
+		job, _, err := q.NextJob(ctx, clientID, []string{"test"})
+		require.NoError(t, err)
+
+		err = q.AbortJob(ctx, clientID, job.ID)
+		require.NoError(t, err)
+
+		err = q.AbortJob(ctx, clientID, job.ID)
+		require.ErrorIs(t, err, inmem.ErrNoJob, "job should already be aborted")
+	})
+
+	t.Run("cannot abort job that is unassigned", func(t *testing.T) {
+		ctx := context.Background()
+		clientID := uint64(123)
+		q := inmem.NewQueue()
+		job, err := q.AddJob(ctx, clientID, "test", 1, json.RawMessage(`{"test": "test"}`))
+		require.NoError(t, err)
+
+		err = q.AbortJob(ctx, clientID, job.ID)
+		require.ErrorIs(t, err, inmem.ErrNoJob, "job is not be assigned yet")
+	})
+
+	t.Run("cannot abort another client's job", func(t *testing.T) {
+		ctx := context.Background()
+		clientID1 := uint64(123)
+		clientID2 := uint64(456)
+		q := inmem.NewQueue()
+		_, err := q.AddJob(ctx, clientID1, "test", 1, json.RawMessage(`{"test": "test"}`))
+		require.NoError(t, err)
+
+		job, _, err := q.NextJob(ctx, clientID1, []string{"test"})
+		require.NoError(t, err)
+
+		err = q.AbortJob(ctx, clientID2, job.ID)
+		require.ErrorIs(t, err, inmem.ErrNoJob, "job is assigned to another client")
+	})
+}

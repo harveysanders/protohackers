@@ -17,9 +17,10 @@ var (
 
 // job represents a job in a queue.
 type job struct {
-	ID      uint64          // Unique identifier.
-	Pri     int64           // Priority. Higher value has higher priority.
-	Payload json.RawMessage // JSON serialized data associated with job
+	ID        uint64          // Unique identifier.
+	Pri       int64           // Priority. Higher value has higher priority.
+	Payload   json.RawMessage // JSON serialized data associated with job
+	queueName string          // Name of queue where the job is located.
 }
 
 type Store struct {
@@ -57,9 +58,10 @@ func (q *Store) AddJob(ctx context.Context, clientID uint64, queueName string, p
 	defer q.qMu.Unlock()
 
 	newJob := job{
-		ID:      id,
-		Pri:     pri,
-		Payload: payload,
+		ID:        id,
+		Pri:       pri,
+		Payload:   payload,
+		queueName: queueName,
 	}
 
 	curQ, ok := q.queues[queueName]
@@ -113,6 +115,31 @@ func (s *Store) NextJob(ctx context.Context, clientID uint64, queueNames []strin
 	return highestPriJob, queueName, nil
 }
 
+// AbortJob aborts a job an assigned job. An abort is only valid from the client that is currently working on that job.
+func (s *Store) AbortJob(ctx context.Context, clientID uint64, jobID uint64) error {
+	s.qMu.Lock()
+	job, ok := s.assigned[clientID]
+	if !ok {
+		return ErrNoJob
+	}
+	if job.ID != jobID {
+		return ErrNoJob
+	}
+
+	s.qMu.Unlock()
+
+	// return the job to the queue
+	_, err := s.AddJob(ctx, clientID, job.queueName, job.Pri, job.Payload)
+	if err != nil {
+		return fmt.Errorf("s.AddJob: %w", err)
+	}
+
+	s.qMu.Lock()
+	delete(s.assigned, clientID)
+	s.qMu.Unlock()
+	return nil
+}
+
 // peek retrieves the highest priority job of the named queue. The job is left in the queue.
 func (s *Store) peek(ctx context.Context, queueName string) (job, error) {
 	s.qMu.Lock()
@@ -144,7 +171,7 @@ func (s *Store) dequeue(ctx context.Context, clientID uint64, queueName string) 
 	job := q[0]
 
 	// Move the job to the assigned map
-	s.assigned[job.ID] = job
+	s.assigned[clientID] = job
 	q = slices.Delete(q, 0, 1)
 	s.queues[queueName] = q
 	return job, nil
