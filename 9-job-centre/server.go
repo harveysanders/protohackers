@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"strings"
 
 	"github.com/harveysanders/protohackers/9-job-centre/inmem"
 	"github.com/harveysanders/protohackers/9-job-centre/jcp"
@@ -29,9 +30,13 @@ var (
 )
 
 type (
-	ErrorResponse struct {
-		Status responseStatus `json:"status"` // Status message. Always "error" for an ErrorResponse.
-		Error  string         `json:"error"`  // Error message.
+	Response struct {
+		Status responseStatus   `json:"status"`          // Status message.
+		ID     *uint64          `json:"id,omitempty"`    // ID of the job.
+		Job    *json.RawMessage `json:"job,omitempty"`   // Job payload.
+		Queue  *string          `json:"queue,omitempty"` // Name of the queue from which the job was retrieved.
+		Pri    *uint64          `json:"pri,omitempty"`   // Job priority.
+		Error  *string          `json:"error,omitempty"` // Error message.
 	}
 
 	GenRequest struct {
@@ -44,30 +49,13 @@ type (
 		Pri   uint64          // Job priority. Higher integer has higher priority.
 	}
 
-	PutResponse struct {
-		Status responseStatus `json:"status"`       // Status message.
-		ID     *uint64        `json:"id,omitempty"` // ID of the job.
-	}
-
 	GetRequest struct {
 		Queues []string `json:"queues"` // Names of queues from which to retrieve the highest priority job.
 		Wait   bool     `json:"wait"`   // If true, the server will wait until there is an available job to respond. If false, the server will respond with "no-job" status if there are no available jobs.
 	}
 
-	GetResponse struct {
-		Status responseStatus   // Status message.
-		ID     *uint64          `json:"id,omitempty"`    // ID of the job.
-		Job    *json.RawMessage `json:"job,omitempty"`   // Job payload.
-		Queue  *string          `json:"queue,omitempty"` // Name of the queue from which the job was retrieved.
-		Pri    *uint64          `json:"pri,omitempty"`   // Job priority.
-	}
-
 	DeleteRequest struct {
 		ID uint64 `json:"id"` // ID of the job to delete.
-	}
-
-	DeleteResponse struct {
-		Status responseStatus // Status message.
 	}
 
 	AbortRequest struct {
@@ -104,10 +92,7 @@ func (s *Server) ServeJCP(ctx context.Context, w jcp.JCPResponseWriter, r *jcp.R
 
 	err := jd.Decode(&body)
 	if err != nil {
-		errResp := ErrorResponse{
-			Status: statusError,
-			Error:  "failed to decode request body",
-		}
+		errResp := errorResponse(err, "failed to decode request")
 		if err = je.Encode(errResp); err != nil {
 			s.log.Printf("failed to encode error response: %v", err)
 		}
@@ -129,9 +114,10 @@ func (s *Server) ServeJCP(ctx context.Context, w jcp.JCPResponseWriter, r *jcp.R
 	case requestTypeAbort:
 		s.log.Println("abort request")
 	default:
-		errResp := ErrorResponse{
+		errMsg := "unknown request type"
+		errResp := Response{
 			Status: statusError,
-			Error:  "unknown request type",
+			Error:  &errMsg,
 		}
 		if err = je.Encode(errResp); err != nil {
 			s.log.Printf("failed to encode error response: %v", err)
@@ -144,14 +130,14 @@ func (s *Server) put(ctx context.Context, w jcp.JCPResponseWriter, r *PutRequest
 	job, err := s.store.AddJob(ctx, 0, r.Queue, r.Pri, r.Job)
 	je := json.NewEncoder(w)
 	if err != nil {
-		errResp := newErrorResponse(err)
+		errResp := errorResponse(err)
 		if err = je.Encode(errResp); err != nil {
 			s.log.Printf("failed to encode error response: %v", err)
 		}
 		return
 	}
 
-	resp := PutResponse{
+	resp := Response{
 		Status: statusOK,
 		ID:     &job.ID,
 	}
@@ -160,18 +146,19 @@ func (s *Server) put(ctx context.Context, w jcp.JCPResponseWriter, r *PutRequest
 	}
 }
 
-// newErrorResponse creates an ErrorResponse from an error.
-func newErrorResponse(err error) ErrorResponse {
-	status := statusError
-	message := err.Error()
+// errorResponse creates an ErrorResponse from an error. If msgs is omitted, the error's message is used.
+func errorResponse(err error, msgs ...string) Response {
 	if err == inmem.ErrNoJob {
-		status = statusNoJob
-		message = "No job found"
+		return Response{Status: statusNoJob}
 	}
 
-	errResp := ErrorResponse{
-		Status: status,
-		Error:  message,
+	errMsg := err.Error()
+	if len(msgs) > 0 {
+		errMsg = strings.Join(msgs, "\n")
 	}
-	return errResp
+
+	return Response{
+		Status: statusError,
+		Error:  &errMsg,
+	}
 }
