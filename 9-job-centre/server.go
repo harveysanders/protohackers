@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"strings"
@@ -44,22 +45,26 @@ type (
 	}
 
 	PutRequest struct {
-		Queue string          `json:"queue"` // Queue name.
-		Job   json.RawMessage // Job payload.
-		Pri   uint64          // Job priority. Higher integer has higher priority.
+		clientID uint64          // Unique client ID.
+		Queue    string          `json:"queue"` // Queue name.
+		Job      json.RawMessage // Job payload.
+		Pri      uint64          // Job priority. Higher integer has higher priority.
 	}
 
 	GetRequest struct {
-		Queues []string `json:"queues"` // Names of queues from which to retrieve the highest priority job.
-		Wait   bool     `json:"wait"`   // If true, the server will wait until there is an available job to respond. If false, the server will respond with "no-job" status if there are no available jobs.
+		clientID uint64   // Unique client ID.
+		Queues   []string `json:"queues"` // Names of queues from which to retrieve the highest priority job.
+		Wait     bool     `json:"wait"`   // If true, the server will wait until there is an available job to respond. If false, the server will respond with "no-job" status if there are no available jobs.
 	}
 
 	DeleteRequest struct {
-		ID uint64 `json:"id"` // ID of the job to delete.
+		clientID uint64 // Unique client ID.
+		ID       uint64 `json:"id"` // ID of the job to delete.
 	}
 
 	AbortRequest struct {
-		ID uint64 `json:"id"` // ID of the job to abort.
+		clientID uint64 // Unique client ID.
+		ID       uint64 `json:"id"` // ID of the job to abort.
 	}
 )
 
@@ -67,6 +72,12 @@ type (
 	store interface {
 		// AddJob adds a job to the queue.
 		AddJob(ctx context.Context, clientID uint64, queueName string, pri uint64, payload json.RawMessage) (inmem.Job, error)
+
+		NextJob(ctx context.Context, clientID uint64, queueNames []string) (inmem.Job, string, error)
+
+		DeleteJob(ctx context.Context, clientID uint64, id uint64) error
+
+		AbortJob(ctx context.Context, clientID uint64, id uint64) error
 	}
 
 	Server struct {
@@ -99,15 +110,29 @@ func (s *Server) ServeJCP(ctx context.Context, w jcp.JCPResponseWriter, r *jcp.R
 		return
 	}
 
+	clientID, ok := ctx.Value(jcp.ContextKeyConnID).(uint64)
+	if !ok {
+		errMsg := "failed to get client ID from context"
+		errResp := errorResponse(errors.New("internal"), errMsg)
+		if err = je.Encode(errResp); err != nil {
+			s.log.Printf("failed to encode error response: %v", err)
+		}
+		return
+	}
 	switch requestType(body.Request) {
 	case requestTypePut:
 		s.log.Println("put request")
 		var req PutRequest
 		json.Unmarshal(bodyRdr.Bytes(), &req)
+		req.clientID = clientID
 		s.put(ctx, w, &req)
 
 	case requestTypeGet:
 		s.log.Println("get request")
+		var req GetRequest
+		json.Unmarshal(bodyRdr.Bytes(), &req)
+		req.clientID = clientID
+		s.get(ctx, w, &req)
 
 	case requestTypeDelete:
 		s.log.Println("delete request")
@@ -140,6 +165,28 @@ func (s *Server) put(ctx context.Context, w jcp.JCPResponseWriter, r *PutRequest
 	resp := Response{
 		Status: statusOK,
 		ID:     &job.ID,
+	}
+	if err = je.Encode(resp); err != nil {
+		s.log.Printf("failed to encode response: %v", err)
+	}
+}
+
+func (s *Server) get(ctx context.Context, w jcp.JCPResponseWriter, r *GetRequest) {
+	je := json.NewEncoder(w)
+	job, queueName, err := s.store.NextJob(ctx, r.clientID, r.Queues)
+	if err != nil {
+		errResp := errorResponse(err)
+		if err = je.Encode(errResp); err != nil {
+			s.log.Printf("failed to encode error response: %v", err)
+		}
+		return
+	}
+	resp := Response{
+		Status: statusOK,
+		ID:     &job.ID,
+		Job:    &job.Payload,
+		Queue:  &queueName,
+		Pri:    &job.Pri,
 	}
 	if err = je.Encode(resp); err != nil {
 		s.log.Printf("failed to encode response: %v", err)

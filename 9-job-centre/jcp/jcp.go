@@ -42,8 +42,14 @@ type (
 	JCPHandler interface {
 		ServeJCP(ctx context.Context, w JCPResponseWriter, r *Request)
 	}
+
+	contextKey string
 )
 
+// contextKeyConnID is a context key for the connection ID. It's value is of type uint64.
+var ContextKeyConnID = contextKey("connection-ID")
+
+// ListenAndServe listens on the TCP network address addr and then calls Serve to handle requests on incoming connections.
 func ListenAndServe(addr string, handler JCPHandler) error {
 	server := &Server{
 		log:     log.Default(),
@@ -105,6 +111,7 @@ func (c *conn) serve(ctx context.Context) {
 			return
 		}
 
+		ctx := context.WithValue(ctx, ContextKeyConnID, c.id)
 		c.server.Handler.ServeJCP(ctx, w, w.req)
 	}
 }
@@ -126,4 +133,8 @@ func (c *conn) readRequest(ctx context.Context) (*response, error) {
 
 func (w *response) Write(data []byte) (int, error) {
 	return w.conn.rwc.Write(data)
+}
+
+func (c contextKey) String() string {
+	return "jcp context key " + string(c)
 }
