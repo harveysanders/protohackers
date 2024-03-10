@@ -45,7 +45,7 @@ func TestServer(t *testing.T) {
 		`{"status":"ok","id":10001}`,
 		`{"status":"ok","id":10001,"job":{"title":"example-job"},"queue":"queue1","pri":123}`,
 		`{"status":"ok"}`,
-		`{"status":"ok","id":10001,"job":{"title":"example-job"}, "queue":"queue1","pri":123}`,
+		`{"status":"ok","id":10001,"job":{"title":"example-job"},"queue":"queue1","pri":123}`,
 		`{"status":"ok"}`,
 		`{"status":"no-job"}`,
 	}

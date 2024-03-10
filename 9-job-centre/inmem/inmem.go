@@ -52,13 +52,17 @@ func (q *Store) nextID() uint64 {
 }
 
 // AddJob adds a job to the named queue.
-func (q *Store) AddJob(ctx context.Context, clientID uint64, queueName string, pri uint64, payload json.RawMessage) (Job, error) {
-	id := q.nextID()
+func (q *Store) AddJob(ctx context.Context, clientID uint64, queueName string, pri uint64, id *uint64, payload json.RawMessage) (Job, error) {
+	// TODO: Accept Job as parameter
+	if id == nil {
+		nextID := q.nextID()
+		id = &nextID
+	}
 	q.qMu.Lock()
 	defer q.qMu.Unlock()
 
 	newJob := Job{
-		ID:        id,
+		ID:        *id,
 		Pri:       pri,
 		Payload:   payload,
 		queueName: queueName,
@@ -129,7 +133,7 @@ func (s *Store) AbortJob(ctx context.Context, clientID uint64, jobID uint64) err
 	s.qMu.Unlock()
 
 	// return the job to the queue
-	_, err := s.AddJob(ctx, clientID, job.queueName, job.Pri, job.Payload)
+	_, err := s.AddJob(ctx, clientID, job.queueName, job.Pri, &jobID, job.Payload)
 	if err != nil {
 		return fmt.Errorf("s.AddJob: %w", err)
 	}

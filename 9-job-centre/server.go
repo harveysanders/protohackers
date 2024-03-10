@@ -71,7 +71,7 @@ type (
 type (
 	store interface {
 		// AddJob adds a job to the queue.
-		AddJob(ctx context.Context, clientID uint64, queueName string, pri uint64, payload json.RawMessage) (inmem.Job, error)
+		AddJob(ctx context.Context, clientID uint64, queueName string, pri uint64, id *uint64, payload json.RawMessage) (inmem.Job, error)
 
 		NextJob(ctx context.Context, clientID uint64, queueNames []string) (inmem.Job, string, error)
 
@@ -123,14 +123,28 @@ func (s *Server) ServeJCP(ctx context.Context, w jcp.JCPResponseWriter, r *jcp.R
 	case requestTypePut:
 		s.log.Println("put request")
 		var req PutRequest
-		json.Unmarshal(bodyRdr.Bytes(), &req)
+		if err := json.Unmarshal(bodyRdr.Bytes(), &req); err != nil {
+			errResp := errorResponse(err, "failed to decode PUT request")
+			if err = je.Encode(errResp); err != nil {
+				s.log.Printf("failed to encode error response: %v", err)
+			}
+			return
+		}
+
 		req.clientID = clientID
 		s.put(ctx, w, &req)
 
 	case requestTypeGet:
 		s.log.Println("get request")
 		var req GetRequest
-		json.Unmarshal(bodyRdr.Bytes(), &req)
+		if err := json.Unmarshal(bodyRdr.Bytes(), &req); err != nil {
+			errResp := errorResponse(err, "failed to decode GET request")
+			if err = je.Encode(errResp); err != nil {
+				s.log.Printf("failed to encode error response: %v", err)
+			}
+			return
+		}
+
 		req.clientID = clientID
 		s.get(ctx, w, &req)
 
@@ -138,6 +152,17 @@ func (s *Server) ServeJCP(ctx context.Context, w jcp.JCPResponseWriter, r *jcp.R
 		s.log.Println("delete request")
 	case requestTypeAbort:
 		s.log.Println("abort request")
+		var req AbortRequest
+		if err := json.Unmarshal(bodyRdr.Bytes(), &req); err != nil {
+			errResp := errorResponse(err, "failed to decode ABORT request")
+			if err = je.Encode(errResp); err != nil {
+				s.log.Printf("failed to encode error response: %v", err)
+			}
+			return
+		}
+
+		req.clientID = clientID
+		s.abort(ctx, w, &req)
 	default:
 		errMsg := "unknown request type"
 		errResp := Response{
@@ -152,7 +177,7 @@ func (s *Server) ServeJCP(ctx context.Context, w jcp.JCPResponseWriter, r *jcp.R
 }
 
 func (s *Server) put(ctx context.Context, w jcp.JCPResponseWriter, r *PutRequest) {
-	job, err := s.store.AddJob(ctx, 0, r.Queue, r.Pri, r.Job)
+	job, err := s.store.AddJob(ctx, 0, r.Queue, r.Pri, nil, r.Job)
 	je := json.NewEncoder(w)
 	if err != nil {
 		errResp := errorResponse(err)
@@ -189,6 +214,20 @@ func (s *Server) get(ctx context.Context, w jcp.JCPResponseWriter, r *GetRequest
 		Pri:    &job.Pri,
 	}
 	if err = je.Encode(resp); err != nil {
+		s.log.Printf("failed to encode response: %v", err)
+	}
+}
+
+func (s *Server) abort(ctx context.Context, w jcp.JCPResponseWriter, r *AbortRequest) {
+	je := json.NewEncoder(w)
+	if err := s.store.AbortJob(ctx, r.clientID, r.ID); err != nil {
+		errResp := errorResponse(err)
+		if err = je.Encode(errResp); err != nil {
+			s.log.Printf("failed to encode error response: %v", err)
+		}
+		return
+	}
+	if err := je.Encode(Response{Status: statusOK}); err != nil {
 		s.log.Printf("failed to encode response: %v", err)
 	}
 }
