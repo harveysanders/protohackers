@@ -150,6 +150,18 @@ func (s *Server) ServeJCP(ctx context.Context, w jcp.JCPResponseWriter, r *jcp.R
 
 	case requestTypeDelete:
 		s.log.Println("delete request")
+		var req DeleteRequest
+		if err := json.Unmarshal(bodyRdr.Bytes(), &req); err != nil {
+			errResp := errorResponse(err, "failed to decode DELETE request")
+			if err = je.Encode(errResp); err != nil {
+				s.log.Printf("failed to encode error response: %v", err)
+			}
+			return
+		}
+
+		req.clientID = clientID
+		s.delete(ctx, w, &req)
+
 	case requestTypeAbort:
 		s.log.Println("abort request")
 		var req AbortRequest
@@ -200,6 +212,15 @@ func (s *Server) get(ctx context.Context, w jcp.JCPResponseWriter, r *GetRequest
 	je := json.NewEncoder(w)
 	job, queueName, err := s.store.NextJob(ctx, r.clientID, r.Queues)
 	if err != nil {
+		if errors.Is(err, inmem.ErrNoJob) {
+			if !r.Wait {
+				if err = je.Encode(Response{Status: statusNoJob}); err != nil {
+					s.log.Printf("failed to encode response: %v", err)
+				}
+				return
+			}
+			s.log.Println("waiting for job")
+		}
 		errResp := errorResponse(err)
 		if err = je.Encode(errResp); err != nil {
 			s.log.Printf("failed to encode error response: %v", err)
@@ -221,6 +242,20 @@ func (s *Server) get(ctx context.Context, w jcp.JCPResponseWriter, r *GetRequest
 func (s *Server) abort(ctx context.Context, w jcp.JCPResponseWriter, r *AbortRequest) {
 	je := json.NewEncoder(w)
 	if err := s.store.AbortJob(ctx, r.clientID, r.ID); err != nil {
+		errResp := errorResponse(err)
+		if err = je.Encode(errResp); err != nil {
+			s.log.Printf("failed to encode error response: %v", err)
+		}
+		return
+	}
+	if err := je.Encode(Response{Status: statusOK}); err != nil {
+		s.log.Printf("failed to encode response: %v", err)
+	}
+}
+
+func (s *Server) delete(ctx context.Context, w jcp.JCPResponseWriter, r *DeleteRequest) {
+	je := json.NewEncoder(w)
+	if err := s.store.DeleteJob(ctx, r.clientID, r.ID); err != nil {
 		errResp := errorResponse(err)
 		if err = je.Encode(errResp); err != nil {
 			s.log.Printf("failed to encode error response: %v", err)
