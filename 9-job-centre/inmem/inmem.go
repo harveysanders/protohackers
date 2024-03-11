@@ -51,9 +51,16 @@ func (q *Store) nextID() uint64 {
 	return q.curID
 }
 
+type AddJobParams struct {
+	ID        *uint64
+	QueueName string
+	Priority  uint64
+	Payload   json.RawMessage
+}
+
 // AddJob adds a job to the named queue.
-func (q *Store) AddJob(ctx context.Context, clientID uint64, queueName string, pri uint64, id *uint64, payload json.RawMessage) (Job, error) {
-	// TODO: Accept Job as parameter
+func (q *Store) AddJob(ctx context.Context, clientID uint64, args AddJobParams) (Job, error) {
+	id := args.ID
 	if id == nil {
 		nextID := q.nextID()
 		id = &nextID
@@ -63,14 +70,14 @@ func (q *Store) AddJob(ctx context.Context, clientID uint64, queueName string, p
 
 	newJob := Job{
 		ID:        *id,
-		Pri:       pri,
-		Payload:   payload,
-		queueName: queueName,
+		Pri:       args.Priority,
+		Payload:   args.Payload,
+		queueName: args.QueueName,
 	}
 
-	curQ, ok := q.queues[queueName]
+	curQ, ok := q.queues[newJob.queueName]
 	if !ok {
-		q.queues[queueName] = []Job{newJob}
+		q.queues[newJob.queueName] = []Job{newJob}
 		return newJob, nil
 	}
 
@@ -85,12 +92,12 @@ func (q *Store) AddJob(ctx context.Context, clientID uint64, queueName string, p
 		curQ = slices.Insert(curQ, index, newJob)
 	}
 
-	q.queues[queueName] = curQ
+	q.queues[newJob.queueName] = curQ
 	return newJob, nil
 }
 
 // NextJob retrieves the highest priority job of all the named queues.
-func (s *Store) NextJob(ctx context.Context, clientID uint64, queueNames []string) (Job, string, error) {
+func (s *Store) NextJob(ctx context.Context, clientID uint64, queueNames []string, wait bool) (Job, string, error) {
 	highestPriJob := Job{Pri: 0}
 	queueName := ""
 	for _, name := range queueNames {
@@ -112,7 +119,7 @@ func (s *Store) NextJob(ctx context.Context, clientID uint64, queueNames []strin
 		return Job{}, "", ErrNoJob
 	}
 
-	_, err := s.dequeue(ctx, clientID, queueName)
+	_, _, err := s.dequeue(ctx, clientID, queueName, wait)
 	if err != nil {
 		return Job{}, "", fmt.Errorf("s.dequeue: %w", err)
 	}
@@ -133,7 +140,12 @@ func (s *Store) AbortJob(ctx context.Context, clientID uint64, jobID uint64) err
 	s.qMu.Unlock()
 
 	// return the job to the queue
-	_, err := s.AddJob(ctx, clientID, job.queueName, job.Pri, &jobID, job.Payload)
+	_, err := s.AddJob(ctx, clientID, AddJobParams{
+		ID:        &jobID,
+		QueueName: job.queueName,
+		Priority:  job.Pri,
+		Payload:   job.Payload,
+	})
 	if err != nil {
 		return fmt.Errorf("s.AddJob: %w", err)
 	}
@@ -159,16 +171,18 @@ func (s *Store) peek(ctx context.Context, queueName string) (Job, error) {
 }
 
 // dequeue remove the job from the queue and adds it to the store's assigned map.
-func (s *Store) dequeue(ctx context.Context, clientID uint64, queueName string) (Job, error) {
+func (s *Store) dequeue(ctx context.Context, clientID uint64, queueName string, wait bool) (Job, <-chan struct{}, error) {
+	jobReady := make(chan struct{})
+
 	s.qMu.Lock()
 	defer s.qMu.Unlock()
 	q, ok := s.queues[queueName]
 	if !ok {
-		return Job{}, ErrNoJob
+		return Job{}, jobReady, ErrNoJob
 	}
 
 	if len(q) == 0 {
-		return Job{}, ErrNoJob
+		return Job{}, jobReady, ErrNoJob
 	}
 
 	// High pri job is first element
@@ -178,7 +192,7 @@ func (s *Store) dequeue(ctx context.Context, clientID uint64, queueName string) 
 	s.assigned[clientID] = job
 	q = slices.Delete(q, 0, 1)
 	s.queues[queueName] = q
-	return job, nil
+	return job, jobReady, nil
 }
 
 // DeleteJob deletes a job from the store. Any client can delete a job,

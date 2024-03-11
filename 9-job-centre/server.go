@@ -71,9 +71,9 @@ type (
 type (
 	store interface {
 		// AddJob adds a job to the queue.
-		AddJob(ctx context.Context, clientID uint64, queueName string, pri uint64, id *uint64, payload json.RawMessage) (inmem.Job, error)
+		AddJob(ctx context.Context, clientID uint64, args inmem.AddJobParams) (inmem.Job, error)
 
-		NextJob(ctx context.Context, clientID uint64, queueNames []string) (inmem.Job, string, error)
+		NextJob(ctx context.Context, clientID uint64, queueNames []string, wait bool) (inmem.Job, string, error)
 
 		DeleteJob(ctx context.Context, clientID uint64, id uint64) error
 
@@ -83,6 +83,7 @@ type (
 	Server struct {
 		log   *log.Logger
 		store store
+		ready chan struct{}
 	}
 )
 
@@ -189,7 +190,11 @@ func (s *Server) ServeJCP(ctx context.Context, w jcp.JCPResponseWriter, r *jcp.R
 }
 
 func (s *Server) put(ctx context.Context, w jcp.JCPResponseWriter, r *PutRequest) {
-	job, err := s.store.AddJob(ctx, 0, r.Queue, r.Pri, nil, r.Job)
+	job, err := s.store.AddJob(ctx, 0, inmem.AddJobParams{
+		QueueName: r.Queue,
+		Priority:  r.Pri,
+		Payload:   r.Job,
+	})
 	je := json.NewEncoder(w)
 	if err != nil {
 		errResp := errorResponse(err)
@@ -210,7 +215,7 @@ func (s *Server) put(ctx context.Context, w jcp.JCPResponseWriter, r *PutRequest
 
 func (s *Server) get(ctx context.Context, w jcp.JCPResponseWriter, r *GetRequest) {
 	je := json.NewEncoder(w)
-	job, queueName, err := s.store.NextJob(ctx, r.clientID, r.Queues)
+	job, queueName, err := s.store.NextJob(ctx, r.clientID, r.Queues, r.Wait)
 	if err != nil {
 		if errors.Is(err, inmem.ErrNoJob) {
 			if !r.Wait {

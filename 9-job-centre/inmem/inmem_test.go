@@ -9,28 +9,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type testJob struct {
-	queueName string
-	pri       int64
-	payload   json.RawMessage
-}
-
 func TestAddJob(t *testing.T) {
-	toInsert := []testJob{
+	toInsert := []inmem.AddJobParams{
 		{
-			queueName: "test",
-			pri:       3,
-			payload:   json.RawMessage(`{"test": "test"}`),
+			QueueName: "test",
+			Priority:  3,
+			Payload:   json.RawMessage(`{"test": "test"}`),
 		},
 		{
-			queueName: "test",
-			pri:       1,
-			payload:   json.RawMessage(`{"test": "test"}`),
+			QueueName: "test",
+			Priority:  1,
+			Payload:   json.RawMessage(`{"test": "test"}`),
 		},
 		{
-			queueName: "test",
-			pri:       2,
-			payload:   json.RawMessage(`{"test": "test"}`),
+			QueueName: "test",
+			Priority:  2,
+			Payload:   json.RawMessage(`{"test": "test"}`),
 		},
 	}
 
@@ -38,13 +32,13 @@ func TestAddJob(t *testing.T) {
 	q := inmem.NewQueue()
 	clientID := uint64(1)
 
-	for _, ti := range toInsert {
-		job, err := q.AddJob(ctx, clientID, ti.queueName, ti.pri, ti.payload)
+	for _, args := range toInsert {
+		job, err := q.AddJob(ctx, clientID, args)
 		require.NoError(t, err)
 
 		require.NotEmpty(t, job.ID)
-		require.Equal(t, ti.payload, job.Payload)
-		require.Equal(t, ti.pri, job.Pri)
+		require.Equal(t, args.Payload, job.Payload)
+		require.Equal(t, args.Priority, job.Pri)
 	}
 }
 
@@ -53,14 +47,18 @@ func TestNextJob(t *testing.T) {
 		clientID := uint64(1)
 		ctx := context.Background()
 		q := inmem.NewQueue()
-
-		_, err := q.AddJob(ctx, clientID, "q1", 1, json.RawMessage(`{"test": "test"}`))
+		args := inmem.AddJobParams{
+			QueueName: "q1",
+			Priority:  1,
+			Payload:   json.RawMessage(`{"test": "test"}`),
+		}
+		_, err := q.AddJob(ctx, clientID, args)
 		require.NoError(t, err)
 
-		j, queueName, err := q.NextJob(ctx, clientID, []string{"q1"})
+		j, queueName, err := q.NextJob(ctx, clientID, []string{"q1"}, false)
 		require.NoError(t, err)
 		require.Equal(t, "q1", queueName)
-		require.Equal(t, int64(1), j.Pri)
+		require.Equal(t, uint64(1), j.Pri)
 	})
 
 	t.Run("multiple jobs", func(t *testing.T) {
@@ -68,15 +66,23 @@ func TestNextJob(t *testing.T) {
 		ctx := context.Background()
 		q := inmem.NewQueue()
 
-		job, err := q.AddJob(ctx, clientID, "queue1", 1, json.RawMessage(`{"test": "test"}`))
+		job, err := q.AddJob(ctx, clientID, inmem.AddJobParams{
+			QueueName: "queue1",
+			Priority:  1,
+			Payload:   json.RawMessage(`{"test": "test"}`),
+		})
 		require.NoError(t, err)
 		require.NotEmpty(t, job.ID)
 
-		job, err = q.AddJob(ctx, clientID, "queue1", 2, json.RawMessage(`{"test": "test"}`))
+		job, err = q.AddJob(ctx, clientID, inmem.AddJobParams{
+			QueueName: "queue1",
+			Priority:  2,
+			Payload:   json.RawMessage(`{"test": "test"}`),
+		})
 		require.NoError(t, err)
 		require.NotEmpty(t, job.ID)
 
-		j, queueName, err := q.NextJob(ctx, clientID, []string{"queue1"})
+		j, queueName, err := q.NextJob(ctx, clientID, []string{"queue1"}, false)
 		require.NoError(t, err)
 		require.Equal(t, "queue1", queueName)
 		require.Equal(t, int64(2), j.Pri)
@@ -87,40 +93,40 @@ func TestNextJob(t *testing.T) {
 		ctx := context.Background()
 		q := inmem.NewQueue()
 
-		jobs := []testJob{
+		jobs := []inmem.AddJobParams{
 			{
-				queueName: "queue1",
-				pri:       1,
-				payload:   json.RawMessage(`{"test": 1}`),
+				QueueName: "queue1",
+				Priority:  1,
+				Payload:   json.RawMessage(`{"test": 1}`),
 			},
 			{
-				queueName: "queue2",
-				pri:       2,
-				payload:   json.RawMessage(`{"test": 2}`),
+				QueueName: "queue2",
+				Priority:  2,
+				Payload:   json.RawMessage(`{"test": 2}`),
 			},
 		}
 
 		for _, job := range jobs {
-			_, err := q.AddJob(ctx, clientID, job.queueName, job.pri, job.payload)
+			_, err := q.AddJob(ctx, clientID, job)
 			require.NoError(t, err)
 		}
 
-		j, queueName, err := q.NextJob(ctx, clientID, []string{"queue1", "queue2"})
+		j, queueName, err := q.NextJob(ctx, clientID, []string{"queue1", "queue2"}, false)
 		require.NoError(t, err)
 		require.Equal(t, "queue2", queueName)
 		require.Equal(t, int64(2), j.Pri)
 
-		j, queueName, err = q.NextJob(ctx, clientID, []string{"queue2", "queue1"})
+		j, queueName, err = q.NextJob(ctx, clientID, []string{"queue2", "queue1"}, false)
 		require.NoError(t, err)
 		require.Equal(t, "queue1", queueName)
 		require.Equal(t, int64(1), j.Pri)
 	})
 
 	t.Run("job unavailable after assigned", func(t *testing.T) {
-		jobs := []testJob{
+		jobs := []inmem.AddJobParams{
 			{
-				queueName: "test",
-				pri:       1,
+				QueueName: "test",
+				Priority:  1,
 			},
 		}
 
@@ -130,16 +136,16 @@ func TestNextJob(t *testing.T) {
 		q := inmem.NewQueue()
 
 		for _, job := range jobs {
-			_, err := q.AddJob(ctx, clientID1, job.queueName, job.pri, job.payload)
+			_, err := q.AddJob(ctx, clientID1, job)
 			require.NoError(t, err)
 		}
 
-		j, queueName, err := q.NextJob(ctx, clientID1, []string{"test"})
+		j, queueName, err := q.NextJob(ctx, clientID1, []string{"test"}, false)
 		require.NoError(t, err)
 		require.Equal(t, "test", queueName)
 		require.Equal(t, int64(1), j.Pri)
 
-		j, queueName, err = q.NextJob(ctx, clientID2, []string{"test"})
+		j, queueName, err = q.NextJob(ctx, clientID2, []string{"test"}, false)
 		require.ErrorIs(t, err, inmem.ErrNoJob)
 		require.Equal(t, "", queueName)
 		require.Empty(t, j)
@@ -148,15 +154,15 @@ func TestNextJob(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	t.Run("Delete assigned job", func(t *testing.T) {
-		jobs := []testJob{
+		jobs := []inmem.AddJobParams{
 			{
-				queueName: "test",
-				pri:       40,
+				QueueName: "test",
+				Priority:  40,
 			},
 
 			{
-				queueName: "test",
-				pri:       300,
+				QueueName: "test",
+				Priority:  300,
 			},
 		}
 
@@ -165,11 +171,11 @@ func TestDelete(t *testing.T) {
 		q := inmem.NewQueue()
 
 		for _, job := range jobs {
-			_, err := q.AddJob(ctx, clientID, job.queueName, job.pri, job.payload)
+			_, err := q.AddJob(ctx, clientID, job)
 			require.NoError(t, err)
 		}
 
-		j, queueName, err := q.NextJob(ctx, clientID, []string{"test"})
+		j, queueName, err := q.NextJob(ctx, clientID, []string{"test"}, false)
 		require.NoError(t, err)
 		require.Equal(t, "test", queueName)
 		require.Equal(t, int64(300), j.Pri)
@@ -178,12 +184,12 @@ func TestDelete(t *testing.T) {
 		err = q.DeleteJob(ctx, clientID, j.ID)
 		require.NoError(t, err)
 
-		j, queueName, err = q.NextJob(ctx, clientID, []string{"test"})
+		j, queueName, err = q.NextJob(ctx, clientID, []string{"test"}, false)
 		require.NoError(t, err)
 		require.Equal(t, "test", queueName)
 		require.Equal(t, int64(40), j.Pri)
 
-		j, queueName, err = q.NextJob(ctx, clientID, []string{"test"})
+		j, queueName, err = q.NextJob(ctx, clientID, []string{"test"}, false)
 		require.ErrorIs(t, err, inmem.ErrNoJob)
 		require.Empty(t, j)
 		require.Empty(t, queueName)
@@ -192,19 +198,19 @@ func TestDelete(t *testing.T) {
 	t.Run("delete available job", func(t *testing.T) {
 		ctx := context.Background()
 		clientID := uint64(123)
-		job := testJob{
-			queueName: "test",
-			pri:       300,
+		job := inmem.AddJobParams{
+			QueueName: "test",
+			Priority:  300,
 		}
 		q := inmem.NewQueue()
-		queued, err := q.AddJob(ctx, clientID, job.queueName, job.pri, job.payload)
+		queued, err := q.AddJob(ctx, clientID, job)
 		require.NoError(t, err)
 		require.NotEmpty(t, queued.ID)
 
 		err = q.DeleteJob(ctx, clientID, queued.ID)
 		require.NoError(t, err)
 
-		_, _, err = q.NextJob(ctx, clientID, []string{"test"})
+		_, _, err = q.NextJob(ctx, clientID, []string{"test"}, false)
 		require.ErrorIs(t, err, inmem.ErrNoJob)
 
 		err = q.DeleteJob(ctx, clientID, queued.ID)
@@ -215,14 +221,14 @@ func TestDelete(t *testing.T) {
 
 func TestAbortJob(t *testing.T) {
 	t.Run("Aborted jobs should be returned to the queue", func(t *testing.T) {
-		jobs := []testJob{
+		jobs := []inmem.AddJobParams{
 			{
-				queueName: "q1",
-				pri:       256,
+				QueueName: "q1",
+				Priority:  256,
 			},
 			{
-				queueName: "q1",
-				pri:       512,
+				QueueName: "q1",
+				Priority:  512,
 			},
 		}
 
@@ -231,11 +237,11 @@ func TestAbortJob(t *testing.T) {
 		q := inmem.NewQueue()
 
 		for _, job := range jobs {
-			_, err := q.AddJob(ctx, clientID, job.queueName, job.pri, job.payload)
+			_, err := q.AddJob(ctx, clientID, job)
 			require.NoError(t, err)
 		}
 
-		j, queueName, err := q.NextJob(ctx, clientID, []string{"q1"})
+		j, queueName, err := q.NextJob(ctx, clientID, []string{"q1"}, false)
 		require.NoError(t, err)
 		require.Equal(t, "q1", queueName)
 		require.Equal(t, int64(512), j.Pri)
@@ -243,7 +249,7 @@ func TestAbortJob(t *testing.T) {
 		err = q.AbortJob(ctx, clientID, j.ID)
 		require.NoError(t, err)
 
-		j, queueName, err = q.NextJob(ctx, clientID, []string{"q1"})
+		j, queueName, err = q.NextJob(ctx, clientID, []string{"q1"}, false)
 		require.NoError(t, err)
 		require.Equal(t, "q1", queueName)
 		require.Equal(t, int64(512), j.Pri)
@@ -253,10 +259,15 @@ func TestAbortJob(t *testing.T) {
 		ctx := context.Background()
 		clientID := uint64(123)
 		q := inmem.NewQueue()
-		_, err := q.AddJob(ctx, clientID, "test", 1, json.RawMessage(`{"test": "test"}`))
+		args := inmem.AddJobParams{
+			QueueName: "test",
+			Priority:  1,
+			Payload:   json.RawMessage(`{"test": "test"}`),
+		}
+		_, err := q.AddJob(ctx, clientID, args)
 		require.NoError(t, err)
 
-		job, _, err := q.NextJob(ctx, clientID, []string{"test"})
+		job, _, err := q.NextJob(ctx, clientID, []string{"test"}, false)
 		require.NoError(t, err)
 
 		err = q.AbortJob(ctx, clientID, job.ID)
@@ -270,7 +281,12 @@ func TestAbortJob(t *testing.T) {
 		ctx := context.Background()
 		clientID := uint64(123)
 		q := inmem.NewQueue()
-		job, err := q.AddJob(ctx, clientID, "test", 1, json.RawMessage(`{"test": "test"}`))
+		args := inmem.AddJobParams{
+			QueueName: "test",
+			Priority:  1,
+			Payload:   json.RawMessage(`{"test": "test"}`),
+		}
+		job, err := q.AddJob(ctx, clientID, args)
 		require.NoError(t, err)
 
 		err = q.AbortJob(ctx, clientID, job.ID)
@@ -282,10 +298,13 @@ func TestAbortJob(t *testing.T) {
 		clientID1 := uint64(123)
 		clientID2 := uint64(456)
 		q := inmem.NewQueue()
-		_, err := q.AddJob(ctx, clientID1, "test", 1, json.RawMessage(`{"test": "test"}`))
+		_, err := q.AddJob(ctx, clientID1, inmem.AddJobParams{
+			QueueName: "test",
+			Priority:  1,
+			Payload:   json.RawMessage(`{"test": "test"}`)})
 		require.NoError(t, err)
 
-		job, _, err := q.NextJob(ctx, clientID1, []string{"test"})
+		job, _, err := q.NextJob(ctx, clientID1, []string{"test"}, false)
 		require.NoError(t, err)
 
 		err = q.AbortJob(ctx, clientID2, job.ID)
