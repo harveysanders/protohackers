@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/harveysanders/protohackers/9-job-centre/inmem"
 	"github.com/stretchr/testify/require"
@@ -309,5 +310,35 @@ func TestAbortJob(t *testing.T) {
 
 		err = s.AbortJob(ctx, clientID2, job.ID)
 		require.ErrorIs(t, err, inmem.ErrNoJob, "job is assigned to another client")
+	})
+}
+
+func TestWaitForNextJob(t *testing.T) {
+	t.Run("wait for job", func(t *testing.T) {
+		ctx := context.Background()
+		clientID := uint64(123)
+		s := inmem.NewStore()
+		job := inmem.AddJobParams{
+			QueueName: "qwerty",
+			Priority:  1,
+			Payload:   json.RawMessage(`{"test": "test"}`),
+		}
+
+		go func(j inmem.AddJobParams) {
+			// SImulate a delay in adding the job
+			time.Sleep(100 * time.Millisecond)
+			_, err := s.AddJob(ctx, clientID, j)
+			require.NoError(t, err)
+		}(job)
+
+		// Not waiting, so should return ErrNoJob
+		_, _, err := s.NextJob(ctx, clientID, []string{"test"}, false)
+		require.ErrorIs(t, err, inmem.ErrNoJob)
+
+		// Should wait indefinitely for a job
+		j, queueName, err := s.NextJob(ctx, clientID, []string{"test", "qwerty", "abc"}, true)
+		require.NoError(t, err)
+		require.Equal(t, "qwerty", queueName)
+		require.Equal(t, uint64(1), j.Pri)
 	})
 }
