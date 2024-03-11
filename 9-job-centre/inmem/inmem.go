@@ -25,18 +25,30 @@ type Job struct {
 
 type Store struct {
 	qMu      *sync.Mutex      // Protects the queues map.
-	queues   map[string][]Job // Queues of available jobs mapped to queue names. In each queue. jobs are sorted in ascending priority order.
+	queues   map[string]queue // Queues of available jobs mapped to queue names. In each queue. jobs are sorted in ascending priority order.
 	assigned map[uint64]Job   // Jobs assigned to workers. Key is worker ID, value is job.
 	deleted  map[uint64]Job   // Deleted job. These jobs can not be reassigned. Key is worker ID, value is job.
 	idMu     *sync.Mutex      // Protect ID incrementor.
 	curID    uint64           // Next available ID.
 }
 
-func NewQueue() *Store {
+type queue struct {
+	jobs  []Job
+	ready chan struct{}
+}
+
+func NewQueue() *queue {
+	return &queue{
+		jobs:  make([]Job, 0, 100),
+		ready: make(chan struct{}, 1),
+	}
+}
+
+func NewStore() *Store {
 	return &Store{
 		idMu:     &sync.Mutex{},
 		qMu:      &sync.Mutex{},
-		queues:   make(map[string][]Job),
+		queues:   make(map[string]queue),
 		assigned: make(map[uint64]Job),
 		deleted:  map[uint64]Job{},
 		curID:    10000,
@@ -44,11 +56,11 @@ func NewQueue() *Store {
 }
 
 // nextID returns the next available ID.
-func (q *Store) nextID() uint64 {
-	q.idMu.Lock()
-	q.curID += 1
-	q.idMu.Unlock()
-	return q.curID
+func (s *Store) nextID() uint64 {
+	s.idMu.Lock()
+	s.curID += 1
+	s.idMu.Unlock()
+	return s.curID
 }
 
 type AddJobParams struct {
@@ -77,19 +89,22 @@ func (q *Store) AddJob(ctx context.Context, clientID uint64, args AddJobParams) 
 
 	curQ, ok := q.queues[newJob.queueName]
 	if !ok {
-		q.queues[newJob.queueName] = []Job{newJob}
+		q.queues[newJob.queueName] = queue{
+			jobs:  []Job{newJob},
+			ready: make(chan struct{}, 1),
+		}
 		return newJob, nil
 	}
 
-	index := slices.IndexFunc(curQ, func(j Job) bool {
+	index := slices.IndexFunc(curQ.jobs, func(j Job) bool {
 		return newJob.Pri >= j.Pri
 	})
 
 	// newJob has lowest priority
 	if index == -1 {
-		curQ = append(curQ, newJob)
+		curQ.jobs = append(curQ.jobs, newJob)
 	} else {
-		curQ = slices.Insert(curQ, index, newJob)
+		curQ.jobs = slices.Insert(curQ.jobs, index, newJob)
 	}
 
 	q.queues[newJob.queueName] = curQ
@@ -119,7 +134,7 @@ func (s *Store) NextJob(ctx context.Context, clientID uint64, queueNames []strin
 		return Job{}, "", ErrNoJob
 	}
 
-	_, _, err := s.dequeue(ctx, clientID, queueName, wait)
+	_, _, err := s.dequeue(ctx, clientID, queueName)
 	if err != nil {
 		return Job{}, "", fmt.Errorf("s.dequeue: %w", err)
 	}
@@ -164,14 +179,14 @@ func (s *Store) peek(ctx context.Context, queueName string) (Job, error) {
 	if !ok {
 		return Job{}, ErrNoJob
 	}
-	if len(curQ) == 0 {
+	if len(curQ.jobs) == 0 {
 		return Job{}, ErrNoJob
 	}
-	return curQ[0], nil
+	return curQ.jobs[0], nil
 }
 
 // dequeue remove the job from the queue and adds it to the store's assigned map.
-func (s *Store) dequeue(ctx context.Context, clientID uint64, queueName string, wait bool) (Job, <-chan struct{}, error) {
+func (s *Store) dequeue(ctx context.Context, clientID uint64, queueName string) (Job, <-chan struct{}, error) {
 	jobReady := make(chan struct{})
 
 	s.qMu.Lock()
@@ -181,16 +196,16 @@ func (s *Store) dequeue(ctx context.Context, clientID uint64, queueName string, 
 		return Job{}, jobReady, ErrNoJob
 	}
 
-	if len(q) == 0 {
+	if len(q.jobs) == 0 {
 		return Job{}, jobReady, ErrNoJob
 	}
 
 	// High pri job is first element
-	job := q[0]
+	job := q.jobs[0]
 
 	// Move the job to the assigned map
 	s.assigned[clientID] = job
-	q = slices.Delete(q, 0, 1)
+	q.jobs = slices.Delete(q.jobs, 0, 1)
 	s.queues[queueName] = q
 	return job, jobReady, nil
 }
@@ -212,17 +227,17 @@ func (s *Store) deleteJobByID(ctx context.Context, jobID uint64) (Job, string,
 
 	// TODO: Optimize this first if it becomes an issue.
 	for queueName, q := range s.queues {
-		idx := slices.IndexFunc(q, func(j Job) bool {
+		idx := slices.IndexFunc(q.jobs, func(j Job) bool {
 			return j.ID == jobID
 		})
 
 		if idx > -1 {
 			// Job found
-			job := q[idx]
+			job := q.jobs[idx]
 			// Move the job to the deleted map
 			s.deleted[job.ID] = job
 			// remove from queue
-			q = slices.Delete(q, idx, 1)
+			q.jobs = slices.Delete(q.jobs, idx, 1)
 			s.queues[queueName] = q
 			return job, queueName, nil
 		}

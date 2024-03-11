@@ -15,7 +15,7 @@ import (
 
 func TestServer(t *testing.T) {
 	addr := ":9999"
-	store := inmem.NewQueue()
+	store := inmem.NewStore()
 	srv := jobcentre.NewServer(store)
 
 	go func() {
