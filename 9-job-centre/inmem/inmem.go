@@ -164,6 +164,10 @@ func (s *Store) NextJob(ctx context.Context, clientID uint64, queueNames []strin
 					}
 					return nextJob, queueName, nil
 				}
+				// Not the queue we are interested in. Notify the next client.
+				log.Printf("[%d] not interested in queue %q\n", clientID, queueName)
+				s.notify(queueName)
+				log.Printf("[%d] notified next client\n", clientID)
 			}
 		}
 		return Job{}, "", fmt.Errorf("s.dequeue: %w", err)
