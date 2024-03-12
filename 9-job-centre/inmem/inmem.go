@@ -24,14 +24,19 @@ type Job struct {
 	queueName string          // Name of queue where the job is located.
 }
 
+// waiter is a client waiting for a job on any of the listed queues.
+type waiter struct {
+	ready      chan string // Channel to notify the client when a job is available.
+	queueNames []string    // Names of queues the client is waiting on.
+}
 type Store struct {
-	qMu      *sync.Mutex      // Protects the queues map.
-	queues   map[string]queue // Queues of available jobs mapped to queue names. In each queue. jobs are sorted in ascending priority order.
-	assigned map[uint64]Job   // Jobs assigned to workers. Key is worker ID, value is job.
-	deleted  map[uint64]Job   // Deleted job. These jobs can not be reassigned. Key is worker ID, value is job.
-	idMu     *sync.Mutex      // Protect ID incrementor.
-	curID    uint64           // Next available ID.
-	ready    chan string      // Notify waiting clients with queue name.
+	qMu      *sync.Mutex       // Protects the queues map.
+	queues   map[string]queue  // Queues of available jobs mapped to queue names. In each queue. jobs are sorted in ascending priority order.
+	assigned map[uint64]Job    // Jobs assigned to workers. Key is worker ID, value is job.
+	deleted  map[uint64]Job    // Deleted job. These jobs can not be reassigned. Key is worker ID, value is job.
+	idMu     *sync.Mutex       // Protect ID incrementor.
+	curID    uint64            // Next available ID.
+	waiting  map[uint64]waiter // Clients waiting for a job on a queue.
 }
 
 type queue struct {
@@ -53,8 +58,7 @@ func NewStore() *Store {
 		assigned: make(map[uint64]Job),
 		deleted:  map[uint64]Job{},
 		curID:    10000,
-		// Unbuffered channel so we only send a notification if there is a waiting client.
-		ready: make(chan string),
+		waiting:  make(map[uint64]waiter),
 	}
 }
 
@@ -118,13 +122,14 @@ func (s *Store) AddJob(ctx context.Context, clientID uint64, args AddJobParams) 
 }
 
 func (s *Store) notify(queueName string) {
-	select {
-	case s.ready <- queueName:
-		log.Printf("notified: %s", queueName)
-	default:
-		log.Println("no one listening")
-		break
+	for _, v := range s.waiting {
+		if slices.Contains(v.queueNames, queueName) {
+			v.ready <- queueName
+			log.Printf("notified: %s", queueName)
+			return
+		}
 	}
+	log.Println("no one listening")
 }
 
 // NextJob retrieves the highest priority job of all the named queues.
@@ -151,26 +156,33 @@ func (s *Store) NextJob(ctx context.Context, clientID uint64, queueNames []strin
 	}
 
 	_, err := s.dequeue(ctx, clientID, queueName)
-	if err != nil {
-		if wait {
-			for {
-				log.Printf("[%d] waiting for next job...\n", clientID)
-				queueName = <-s.ready
-				log.Printf("[%d] received job on queue %q\n", clientID, queueName)
-				if slices.Contains(queueNames, queueName) {
-					nextJob, err := s.dequeue(ctx, clientID, queueName)
-					if err != nil {
-						return Job{}, "", fmt.Errorf("s.dequeue: %w", err)
-					}
-					return nextJob, queueName, nil
-				}
-				// Not the queue we are interested in. Notify the next client.
-				log.Printf("[%d] not interested in queue %q\n", clientID, queueName)
-				s.notify(queueName)
-				log.Printf("[%d] notified next client\n", clientID)
-			}
-		}
+	if err != nil && err != ErrNoJob {
 		return Job{}, "", fmt.Errorf("s.dequeue: %w", err)
+	}
+	if err == ErrNoJob {
+		if !wait {
+			return Job{}, "", fmt.Errorf("s.dequeue: %w", err)
+		}
+
+		// Wait for a job to be added to the queue
+		ready := make(chan string)
+		s.qMu.Lock()
+		s.waiting[clientID] = waiter{queueNames: queueNames, ready: ready}
+		s.qMu.Unlock()
+
+		log.Printf("[%d] waiting for next job...\n", clientID)
+		queueName = <-ready
+		log.Printf("[%d] received job on queue %q\n", clientID, queueName)
+
+		s.qMu.Lock()
+		delete(s.waiting, clientID)
+		s.qMu.Unlock()
+
+		nextJob, err := s.dequeue(ctx, clientID, queueName)
+		if err != nil {
+			return Job{}, "", fmt.Errorf("s.dequeue: %w", err)
+		}
+		return nextJob, queueName, nil
 	}
 	return highestPriJob, queueName, nil
 }
