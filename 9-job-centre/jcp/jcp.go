@@ -46,6 +46,8 @@ type (
 	contextKey string
 )
 
+var ErrConnClosed = fmt.Errorf("connection closed")
+
 // contextKeyConnID is a context key for the connection ID. It's value is of type uint64.
 var ContextKeyConnID = contextKey("connection-ID")
 
@@ -103,23 +105,28 @@ func (c *conn) serve(ctx context.Context) {
 	defer c.rwc.Close()
 	c.bufr = bufio.NewReader(c.rwc)
 	c.bufw = bufio.NewWriter(c.rwc)
+	ctx, cancel := context.WithCancelCause(context.WithValue(ctx, ContextKeyConnID, c.id))
 
 	for {
 		w, err := c.readRequest(ctx)
+		if err == io.EOF {
+			cancel(ErrConnClosed)
+			c.server.Handler.ServeJCP(ctx, w, w.req)
+			return
+		}
 		if err != nil {
 			c.server.log.Println("readRequest:", err)
 			return
 		}
 
-		ctx := context.WithValue(ctx, ContextKeyConnID, c.id)
 		c.server.Handler.ServeJCP(ctx, w, w.req)
 	}
 }
 
 func (c *conn) readRequest(ctx context.Context) (*response, error) {
 	line, err := c.bufr.ReadBytes('\n')
-	if err != nil {
-		return &response{}, fmt.Errorf("bufr.ReadBytes: %w", err)
+	if err != nil && err != io.EOF {
+		return nil, fmt.Errorf("bufr.ReadBytes: %w", err)
 	}
 
 	w := &response{
@@ -128,7 +135,7 @@ func (c *conn) readRequest(ctx context.Context) (*response, error) {
 			Body: bytes.NewReader(line),
 		},
 	}
-	return w, nil
+	return w, err
 }
 
 func (w *response) Write(data []byte) (int, error) {

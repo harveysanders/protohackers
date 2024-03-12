@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"strings"
@@ -78,12 +79,13 @@ type (
 		DeleteJob(ctx context.Context, clientID uint64, id uint64) error
 
 		AbortJob(ctx context.Context, clientID uint64, id uint64) error
+
+		GetAssignedJob(ctx context.Context, clientID uint64) (inmem.Job, error)
 	}
 
 	Server struct {
 		log   *log.Logger
 		store store
-		ready chan struct{}
 	}
 )
 
@@ -102,90 +104,106 @@ func (s *Server) ServeJCP(ctx context.Context, w jcp.JCPResponseWriter, r *jcp.R
 	jd := json.NewDecoder(tr)
 	je := json.NewEncoder(w)
 
-	err := jd.Decode(&body)
-	if err != nil {
-		errResp := errorResponse(err, "failed to decode request")
-		if err = je.Encode(errResp); err != nil {
-			s.log.Printf("failed to encode error response: %v", err)
-		}
-		return
-	}
-
 	clientID, ok := ctx.Value(jcp.ContextKeyConnID).(uint64)
 	if !ok {
 		errMsg := "failed to get client ID from context"
 		errResp := errorResponse(errors.New("internal"), errMsg)
-		if err = je.Encode(errResp); err != nil {
+		if err := je.Encode(errResp); err != nil {
 			s.log.Printf("failed to encode error response: %v", err)
 		}
 		return
 	}
-	switch requestType(body.Request) {
-	case requestTypePut:
-		s.log.Println("put request")
-		var req PutRequest
-		if err := json.Unmarshal(bodyRdr.Bytes(), &req); err != nil {
-			errResp := errorResponse(err, "failed to decode PUT request")
-			if err = je.Encode(errResp); err != nil {
-				s.log.Printf("failed to encode error response: %v", err)
-			}
+
+	select {
+	case <-ctx.Done():
+		s.log.Printf("[%d] context done: %v", clientID, context.Cause(ctx))
+		// TODO: Abort any jobs that are currently being worked on by this client.
+		assigned, err := s.store.GetAssignedJob(ctx, clientID)
+		if err == inmem.ErrNoJob {
+			log.Printf("[%d] no job assigned", clientID)
 			return
 		}
 
-		req.clientID = clientID
-		s.put(ctx, w, &req)
+		s.log.Printf("[%d] aborting job %d", clientID, assigned.ID)
+		s.abort(ctx, w, &AbortRequest{clientID: clientID, ID: assigned.ID})
 
-	case requestTypeGet:
-		s.log.Println("get request")
-		var req GetRequest
-		if err := json.Unmarshal(bodyRdr.Bytes(), &req); err != nil {
-			errResp := errorResponse(err, "failed to decode GET request")
-			if err = je.Encode(errResp); err != nil {
-				s.log.Printf("failed to encode error response: %v", err)
-			}
-			return
-		}
-
-		req.clientID = clientID
-		s.get(ctx, w, &req)
-
-	case requestTypeDelete:
-		s.log.Println("delete request")
-		var req DeleteRequest
-		if err := json.Unmarshal(bodyRdr.Bytes(), &req); err != nil {
-			errResp := errorResponse(err, "failed to decode DELETE request")
-			if err = je.Encode(errResp); err != nil {
-				s.log.Printf("failed to encode error response: %v", err)
-			}
-			return
-		}
-
-		req.clientID = clientID
-		s.delete(ctx, w, &req)
-
-	case requestTypeAbort:
-		s.log.Println("abort request")
-		var req AbortRequest
-		if err := json.Unmarshal(bodyRdr.Bytes(), &req); err != nil {
-			errResp := errorResponse(err, "failed to decode ABORT request")
-			if err = je.Encode(errResp); err != nil {
-				s.log.Printf("failed to encode error response: %v", err)
-			}
-			return
-		}
-
-		req.clientID = clientID
-		s.abort(ctx, w, &req)
 	default:
-		errMsg := "unknown request type"
-		errResp := Response{
-			Status: statusError,
-			Error:  &errMsg,
+		err := jd.Decode(&body)
+		if err != nil {
+			errResp := errorResponse(err, "failed to decode request")
+			if err = je.Encode(errResp); err != nil {
+				s.log.Printf("failed to encode error response: %v", err)
+			}
+			return
 		}
-		if err = je.Encode(errResp); err != nil {
-			s.log.Printf("failed to encode error response: %v", err)
+
+		switch requestType(body.Request) {
+		case requestTypePut:
+			s.log.Println(formatReqLog("PUT", clientID))
+			var req PutRequest
+			if err := json.Unmarshal(bodyRdr.Bytes(), &req); err != nil {
+				errResp := errorResponse(err, "failed to decode PUT request")
+				if err = je.Encode(errResp); err != nil {
+					s.log.Printf("failed to encode error response: %v", err)
+				}
+				return
+			}
+
+			req.clientID = clientID
+			s.put(ctx, w, &req)
+
+		case requestTypeGet:
+			s.log.Println(formatReqLog("GET", clientID))
+			var req GetRequest
+			if err := json.Unmarshal(bodyRdr.Bytes(), &req); err != nil {
+				errResp := errorResponse(err, "failed to decode GET request")
+				if err = je.Encode(errResp); err != nil {
+					s.log.Printf("failed to encode error response: %v", err)
+				}
+				return
+			}
+
+			req.clientID = clientID
+			s.get(ctx, w, &req)
+
+		case requestTypeDelete:
+			s.log.Println(formatReqLog("DELETE", clientID))
+			var req DeleteRequest
+			if err := json.Unmarshal(bodyRdr.Bytes(), &req); err != nil {
+				errResp := errorResponse(err, "failed to decode DELETE request")
+				if err = je.Encode(errResp); err != nil {
+					s.log.Printf("failed to encode error response: %v", err)
+				}
+				return
+			}
+
+			req.clientID = clientID
+			s.delete(ctx, w, &req)
+
+		case requestTypeAbort:
+			s.log.Println(formatReqLog("ABORT", clientID))
+			var req AbortRequest
+			if err := json.Unmarshal(bodyRdr.Bytes(), &req); err != nil {
+				errResp := errorResponse(err, "failed to decode ABORT request")
+				if err = je.Encode(errResp); err != nil {
+					s.log.Printf("failed to encode error response: %v", err)
+				}
+				return
+			}
+
+			req.clientID = clientID
+			s.abort(ctx, w, &req)
+		default:
+			errMsg := "unknown request type"
+			errResp := Response{
+				Status: statusError,
+				Error:  &errMsg,
+			}
+			if err = je.Encode(errResp); err != nil {
+				s.log.Printf("failed to encode error response: %v", err)
+			}
+			return
 		}
-		return
 	}
 }
 
@@ -287,4 +305,8 @@ func errorResponse(err error, msgs ...string) Response {
 		Status: statusError,
 		Error:  &errMsg,
 	}
+}
+
+func formatReqLog(method string, clientID uint64) string {
+	return fmt.Sprintf("<-- [%d] %s", clientID, method)
 }

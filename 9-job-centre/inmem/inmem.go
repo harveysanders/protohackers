@@ -154,9 +154,9 @@ func (s *Store) NextJob(ctx context.Context, clientID uint64, queueNames []strin
 	if err != nil {
 		if wait {
 			for {
-				log.Printf("%d waiting for next job...\n", clientID)
+				log.Printf("[%d] waiting for next job...\n", clientID)
 				queueName = <-s.ready
-				log.Printf("%d received job on queue %q\n", clientID, queueName)
+				log.Printf("[%d] received job on queue %q\n", clientID, queueName)
 				if slices.Contains(queueNames, queueName) {
 					nextJob, err := s.dequeue(ctx, clientID, queueName)
 					if err != nil {
@@ -199,6 +199,16 @@ func (s *Store) AbortJob(ctx context.Context, clientID uint64, jobID uint64) err
 	delete(s.assigned, clientID)
 	s.qMu.Unlock()
 	return nil
+}
+
+func (s *Store) GetAssignedJob(ctx context.Context, clientID uint64) (Job, error) {
+	s.qMu.Lock()
+	defer s.qMu.Unlock()
+	job, ok := s.assigned[clientID]
+	if !ok {
+		return Job{}, ErrNoJob
+	}
+	return job, nil
 }
 
 // peek retrieves the highest priority job of the named queue. The job is left in the queue.
