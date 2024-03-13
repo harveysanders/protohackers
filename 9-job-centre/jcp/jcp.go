@@ -106,6 +106,10 @@ func (s *Server) Close(ctx context.Context) error {
 	return s.listener.Close()
 }
 
+func (s *Server) SetLogger(logger *log.Logger) {
+	s.log = logger
+}
+
 func (c *conn) serve(ctx context.Context) {
 	defer c.rwc.Close()
 	c.bufr = bufio.NewReader(c.rwc)

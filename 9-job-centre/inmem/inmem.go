@@ -300,8 +300,9 @@ func (s *Store) deleteJobByID(ctx context.Context, jobID uint64) (Job, string,
 	}
 
 	// Check if assigned
-	for _, j := range s.assigned {
+	for clientID, j := range s.assigned {
 		if j.ID == jobID {
+			delete(s.assigned, clientID)
 			return j, "assigned", nil
 		}
 	}

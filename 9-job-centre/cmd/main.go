@@ -21,6 +21,8 @@ func main() {
 		Handler: jobcentre.NewApp(store),
 	}
 
+	srv.SetLogger(log.New(os.Stdout, "job-centre: ", log.LstdFlags))
+
 	log.Print("Listening on port " + port)
 	err := srv.ListenAndServe()
 	if err != nil {

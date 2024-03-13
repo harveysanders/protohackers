@@ -26,7 +26,7 @@ func TestServer(t *testing.T) {
 	go func() {
 		err := srv.ListenAndServe()
 		if err != nil {
-			log.Fatal(err)
+			log.Println(err)
 		}
 	}()
 
@@ -158,8 +158,31 @@ func TestErrors(t *testing.T) {
 		}
 	})
 
-	t.Run("unable to delete aborted job", func(t *testing.T) {
-		addr := ":9997"
+}
+
+func TestServerErrors(t *testing.T) {
+	t.Run("unable to abort already deleted job part 2", func(t *testing.T) {
+		type (
+			clientID   int
+			ReqResPair struct {
+				req      string
+				wantResp string
+				clientID clientID
+				label    string
+			}
+
+			gotResp struct {
+				clientID clientID
+				resp     string
+			}
+		)
+
+		const (
+			clientID0 clientID = iota
+			clientID1
+		)
+
+		addr := ":9996"
 		srv := &jcp.Server{
 			Addr:    addr,
 			Handler: jobcentre.NewApp(inmem.NewStore()),
@@ -173,45 +196,114 @@ func TestErrors(t *testing.T) {
 
 		time.Sleep(100 * time.Millisecond)
 
-		client18, err := net.Dial("tcp", addr)
-		require.NoError(t, err)
-		client19, err := net.Dial("tcp", addr)
+		requests := []ReqResPair{
+			{
+				req:      `{"pri":100,"queue":"q-31hlLeih","request":"put","job":{"title":"j-PJrtLHI1"}}`,
+				wantResp: `{"status":"ok","id":10001}`,
+				clientID: clientID0,
+				label:    "[0] PUT j-PJrtLHI1",
+			},
+			{
+				req:      `{"queue":"q-31hlLeih","pri":100,"job":{"title":"j-5sDhysOG"},"request":"put"}`,
+				wantResp: `{"status":"ok","id":10002}`,
+				clientID: clientID1,
+				label:    "[1] PUT j-5sDhysOG",
+			},
+			{
+				req:      `{"request":"abort","id":10002}`,
+				wantResp: `{"status":"no-job"}`,
+				clientID: clientID1,
+				label:    "[1] ABORT 10002 - not assigned",
+			},
+			{
+				req:      `{"queues":["q-31hlLeih"],"request":"get"}`,
+				wantResp: `{"status":"ok","id":10002,"job":{"title":"j-5sDhysOG"},"queue":"q-31hlLeih","pri":100}`,
+				clientID: clientID1,
+				label:    "[1] GET",
+			},
+			{
+				req:      `{"queues":["q-31hlLeih"],"request":"get"}`,
+				wantResp: `{"status":"ok","id":10001,"job":{"title":"j-PJrtLHI1"},"queue":"q-31hlLeih","pri":100}`,
+				clientID: clientID0,
+				label:    "[0] GET",
+			},
+			{
+				req:      `{"request":"delete","id":10002}`,
+				wantResp: `{"status":"ok"}`,
+				clientID: clientID1,
+				label:    "[0] DELETE 10002",
+			},
+			{
+				req:      `{"request":"abort","id":10001}`,
+				wantResp: `{"status":"no-job"}`,
+				clientID: clientID1,
+				label:    "[1] ABORT 10001 - assigned to another client",
+			},
+			{
+				req:      `{"request":"delete","id":10001}`,
+				wantResp: `{"status":"ok"}`,
+				clientID: clientID0,
+				label:    "[0] DELETE 10001",
+			},
+			{
+				req:      `{"request":"abort","id":10001}`,
+				wantResp: `{"status":"no-job"}`,
+				clientID: clientID0,
+				label:    "[0] ABORT 10001 - already deleted",
+			},
+		}
+
+		client0, err := net.Dial("tcp", addr)
 		require.NoError(t, err)
 
-		bufRdr18 := bufio.NewReader(client18)
-		bufRdr19 := bufio.NewReader(client19)
-
-		_, err = client18.Write([]byte(`{"job":{"title":"j-e6vUG0t5"},"pri":100,"queue":"q-np36thox","request":"put"}` + "\n"))
+		client1, err := net.Dial("tcp", addr)
 		require.NoError(t, err)
 
-		_, err = client19.Write([]byte(`{"pri":100,"job":{"title":"j-wJg3D6NQ"},"request":"put","queue":"q-np36thox"}` + "\n"))
-		require.NoError(t, err)
+		bufRdr0 := bufio.NewReader(client0)
+		bufRdr1 := bufio.NewReader(client1)
 
-		gotResp, err := bufRdr18.ReadBytes('\n')
-		require.NoError(t, err)
-		require.JSONEq(t, `{"status":"ok","id":10001}`+"\n", string(gotResp))
+		var mu sync.Mutex
+		clientResponses := make([]gotResp, 0, len(requests))
 
-		gotResp, err = bufRdr19.ReadBytes('\n')
-		require.NoError(t, err)
-		require.JSONEq(t, `{"status":"ok","id":10002}`+"\n", string(gotResp))
+		wg := sync.WaitGroup{}
+		wg.Add(len(requests))
+		go func() {
+			for {
+				resp, err := bufRdr0.ReadBytes('\n')
+				require.NoError(t, err)
+				mu.Lock()
+				clientResponses = append(clientResponses, gotResp{clientID: clientID0, resp: string(resp)})
+				mu.Unlock()
+				wg.Done()
+			}
+		}()
 
-		_, err = client18.Write([]byte(`{"request":"delete","id":10001}` + "\n"))
-		require.NoError(t, err)
-		_, err = client19.Write([]byte(`{"request":"delete","id":10001}` + "\n"))
-		require.NoError(t, err)
+		go func() {
+			for {
+				resp, err := bufRdr1.ReadBytes('\n')
+				require.NoError(t, err)
+				mu.Lock()
+				clientResponses = append(clientResponses, gotResp{clientID: clientID1, resp: string(resp)})
+				mu.Unlock()
+				wg.Done()
+			}
+		}()
 
-		gotResp, err = bufRdr18.ReadBytes('\n')
-		require.NoError(t, err)
-		require.JSONEq(t, `{"status":"ok"}`+"\n", string(gotResp))
-		gotResp, err = bufRdr19.ReadBytes('\n')
-		require.NoError(t, err)
-		require.JSONEq(t, `{"status":"no-job"}`+"\n", string(gotResp))
+		for _, reqResp := range requests {
+			client := client0
+			if reqResp.clientID == clientID1 {
+				client = client1
+			}
+			_, err := client.Write([]byte(reqResp.req + "\n"))
+			require.NoError(t, err)
 
-		_, err = client18.Write([]byte(`{"request":"abort","id":10001}` + "\n"))
-		require.NoError(t, err)
+			time.Sleep(10 * time.Millisecond)
+		}
 
-		gotResp, err = bufRdr18.ReadBytes('\n')
-		require.NoError(t, err)
-		require.JSONEq(t, `{"status":"no-job"}`+"\n", string(gotResp))
+		wg.Wait()
+		for i, got := range clientResponses {
+			require.Equal(t, requests[i].clientID, got.clientID, requests[i].label)
+			require.JSONEq(t, requests[i].wantResp+"\n", got.resp, requests[i].label)
+		}
 	})
 }
