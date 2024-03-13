@@ -16,9 +16,13 @@ func main() {
 	}
 
 	store := inmem.NewStore()
-	srv := jobcentre.NewServer(store)
+	srv := &jcp.Server{
+		Addr:    ":" + port,
+		Handler: jobcentre.NewApp(store),
+	}
+
 	log.Print("Listening on port " + port)
-	err := jcp.ListenAndServe(":"+port, srv)
+	err := srv.ListenAndServe()
 	if err != nil {
 		panic(err)
 	}

@@ -89,7 +89,7 @@ type (
 	}
 )
 
-func NewServer(store store) *Server {
+func NewApp(store store) *Server {
 	return &Server{
 		store: store,
 		log:   log.Default(),

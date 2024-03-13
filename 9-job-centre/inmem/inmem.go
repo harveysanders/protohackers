@@ -192,9 +192,11 @@ func (s *Store) AbortJob(ctx context.Context, clientID uint64, jobID uint64) err
 	s.qMu.Lock()
 	job, ok := s.assigned[clientID]
 	if !ok {
+		s.qMu.Unlock()
 		return ErrNoJob
 	}
 	if job.ID != jobID {
+		s.qMu.Unlock()
 		return ErrNoJob
 	}
 

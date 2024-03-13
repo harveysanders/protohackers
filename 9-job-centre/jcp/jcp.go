@@ -30,9 +30,10 @@ type (
 	}
 
 	Server struct {
-		log     *log.Logger
-		Addr    string
-		Handler JCPHandler
+		Addr     string
+		Handler  JCPHandler
+		log      *log.Logger
+		listener net.Listener
 	}
 
 	JCPResponseWriter interface {
@@ -72,10 +73,10 @@ func (s *Server) ListenAndServe() error {
 
 func (s *Server) Serve(ln net.Listener) error {
 	defer func() {
-		s.log.Println("closing server")
 		ln.Close()
 	}()
 
+	s.listener = ln
 	ctx := context.Background()
 	var connID uint64
 
@@ -99,6 +100,10 @@ func (s *Server) Serve(ln net.Listener) error {
 
 		connID++
 	}
+}
+
+func (s *Server) Close(ctx context.Context) error {
+	return s.listener.Close()
 }
 
 func (c *conn) serve(ctx context.Context) {

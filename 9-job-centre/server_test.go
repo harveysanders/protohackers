@@ -2,8 +2,10 @@ package jobcentre_test
 
 import (
 	"bufio"
+	"context"
 	"log"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,14 +18,19 @@ import (
 func TestServer(t *testing.T) {
 	addr := ":9999"
 	store := inmem.NewStore()
-	srv := jobcentre.NewServer(store)
+	srv := &jcp.Server{
+		Addr:    addr,
+		Handler: jobcentre.NewApp(store),
+	}
 
 	go func() {
-		err := jcp.ListenAndServe(addr, srv)
+		err := srv.ListenAndServe()
 		if err != nil {
 			log.Fatal(err)
 		}
 	}()
+
+	defer srv.Close(context.Background())
 
 	time.Sleep(100 * time.Millisecond)
 	client, err := net.Dial("tcp", addr)
@@ -59,4 +66,98 @@ func TestServer(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, wantResp[i]+"\n", string(gotResp))
 	}
+}
+
+func TestErrors(t *testing.T) {
+	type ReqWantResp struct {
+		req      string
+		wantResp string
+	}
+	t.Run("6errors.test", func(t *testing.T) {
+		addr := ":9998"
+		store := inmem.NewStore()
+		handler := jobcentre.NewApp(store)
+
+		srv := &jcp.Server{
+			Addr:    addr,
+			Handler: handler,
+		}
+
+		go func() {
+			err := srv.ListenAndServe()
+			if err != nil {
+				log.Fatal(err)
+			}
+		}()
+
+		defer srv.Close(context.Background())
+
+		time.Sleep(100 * time.Millisecond)
+
+		clientAReqResps := []ReqWantResp{
+			{
+				req:      `{"queue":"q-qSaTxrlY","request":"put","job":{"title":"j-kWFumbG4"},"pri":100}`,
+				wantResp: `{"status":"ok","id":10001}`,
+			},
+			{
+				req:      `{"request":"abort","id":10201}`,
+				wantResp: `{"status":"no-job"}`, // job is not be assigned yet
+			},
+			{
+				req:      `{"queues":["q-qSaTxrlY"],"request":"get"}`,
+				wantResp: `{"status":"ok","id":10002,"job":{"title":"j-fhLupEsm"},"queue":"q-qSaTxrlY","pri":100}`,
+			},
+		}
+
+		clientBReqResps := []ReqWantResp{
+			{
+				req:      `{"queue":"q-qSaTxrlY","request":"put","job":{"title":"j-fhLupEsm"},"pri":100}`,
+				wantResp: `{"status":"ok","id":10002}`,
+			},
+			{
+				req:      `{"queues":["q-qSaTxrlY"],"request":"get"}`,
+				wantResp: `{"status":"ok","id":10001,"job":{"title":"j-kWFumbG4"},"queue":"q-qSaTxrlY","pri":100}`,
+			},
+		}
+
+		clientA, err := net.Dial("tcp", addr)
+		require.NoError(t, err)
+		clientB, err := net.Dial("tcp", addr)
+		require.NoError(t, err)
+
+		bufRdrA := bufio.NewReader(clientA)
+		bufRdrB := bufio.NewReader(clientB)
+
+		gotBResponses := make([]string, 0, 2)
+		wg := sync.WaitGroup{}
+		wg.Add(len(clientBReqResps))
+		go func() {
+			for {
+				gotRespB, err := bufRdrB.ReadBytes('\n')
+				require.NoError(t, err)
+				gotBResponses = append(gotBResponses, string(gotRespB))
+				wg.Done()
+			}
+		}()
+
+		for i, convoA := range clientAReqResps {
+			_, err := clientA.Write([]byte(convoA.req + "\n"))
+			require.NoError(t, err)
+
+			if i > 0 && i < len(clientBReqResps)+1 {
+				time.Sleep(100 * time.Millisecond)
+				_, err := clientB.Write([]byte(clientBReqResps[i-1].req + "\n"))
+				require.NoError(t, err)
+			}
+
+			gotResp, err := bufRdrA.ReadBytes('\n')
+			require.NoError(t, err)
+			require.JSONEq(t, convoA.wantResp+"\n", string(gotResp))
+		}
+
+		wg.Wait()
+		for i, b := range clientBReqResps {
+			require.JSONEq(t, b.wantResp+"\n", gotBResponses[i])
+		}
+	})
 }
