@@ -293,7 +293,7 @@ func (s *Store) deleteJobByID(ctx context.Context, jobID uint64) (Job, string,
 			// Move the job to the deleted map
 			s.deleted[job.ID] = job
 			// remove from queue
-			q.jobs = slices.Delete(q.jobs, idx, 1)
+			q.jobs = slices.Delete(q.jobs, idx, idx+1)
 			s.queues[queueName] = q
 			return job, queueName, nil
 		}

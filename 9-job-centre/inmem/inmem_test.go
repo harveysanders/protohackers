@@ -218,6 +218,29 @@ func TestDelete(t *testing.T) {
 		require.ErrorIs(t, err, inmem.ErrNoJob, "job should already be deleted")
 	})
 
+	t.Run("cannot delete a deleted job", func(t *testing.T) {
+		ctx := context.Background()
+		clientID := uint64(123)
+		job := inmem.AddJobParams{
+			QueueName: "test",
+			Priority:  300,
+		}
+		s := inmem.NewStore()
+		queued, err := s.AddJob(ctx, clientID, job)
+		require.NoError(t, err)
+		require.NotEmpty(t, queued.ID)
+
+		another, err := s.AddJob(ctx, clientID, job)
+		require.NoError(t, err)
+		require.NotEmpty(t, another.ID)
+
+		err = s.DeleteJob(ctx, clientID, queued.ID)
+		require.NoError(t, err)
+
+		err = s.DeleteJob(ctx, clientID, queued.ID)
+		require.ErrorIs(t, err, inmem.ErrNoJob, "job should already be deleted")
+	})
+
 }
 
 func TestAbortJob(t *testing.T) {

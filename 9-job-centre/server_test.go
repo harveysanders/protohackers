@@ -84,10 +84,7 @@ func TestErrors(t *testing.T) {
 		}
 
 		go func() {
-			err := srv.ListenAndServe()
-			if err != nil {
-				log.Fatal(err)
-			}
+			_ = srv.ListenAndServe()
 		}()
 
 		defer srv.Close(context.Background())
@@ -159,5 +156,62 @@ func TestErrors(t *testing.T) {
 		for i, b := range clientBReqResps {
 			require.JSONEq(t, b.wantResp+"\n", gotBResponses[i])
 		}
+	})
+
+	t.Run("unable to delete aborted job", func(t *testing.T) {
+		addr := ":9997"
+		srv := &jcp.Server{
+			Addr:    addr,
+			Handler: jobcentre.NewApp(inmem.NewStore()),
+		}
+
+		go func() {
+			_ = srv.ListenAndServe()
+		}()
+
+		defer srv.Close(context.Background())
+
+		time.Sleep(100 * time.Millisecond)
+
+		client18, err := net.Dial("tcp", addr)
+		require.NoError(t, err)
+		client19, err := net.Dial("tcp", addr)
+		require.NoError(t, err)
+
+		bufRdr18 := bufio.NewReader(client18)
+		bufRdr19 := bufio.NewReader(client19)
+
+		_, err = client18.Write([]byte(`{"job":{"title":"j-e6vUG0t5"},"pri":100,"queue":"q-np36thox","request":"put"}` + "\n"))
+		require.NoError(t, err)
+
+		_, err = client19.Write([]byte(`{"pri":100,"job":{"title":"j-wJg3D6NQ"},"request":"put","queue":"q-np36thox"}` + "\n"))
+		require.NoError(t, err)
+
+		gotResp, err := bufRdr18.ReadBytes('\n')
+		require.NoError(t, err)
+		require.JSONEq(t, `{"status":"ok","id":10001}`+"\n", string(gotResp))
+
+		gotResp, err = bufRdr19.ReadBytes('\n')
+		require.NoError(t, err)
+		require.JSONEq(t, `{"status":"ok","id":10002}`+"\n", string(gotResp))
+
+		_, err = client18.Write([]byte(`{"request":"delete","id":10001}` + "\n"))
+		require.NoError(t, err)
+		_, err = client19.Write([]byte(`{"request":"delete","id":10001}` + "\n"))
+		require.NoError(t, err)
+
+		gotResp, err = bufRdr18.ReadBytes('\n')
+		require.NoError(t, err)
+		require.JSONEq(t, `{"status":"ok"}`+"\n", string(gotResp))
+		gotResp, err = bufRdr19.ReadBytes('\n')
+		require.NoError(t, err)
+		require.JSONEq(t, `{"status":"no-job"}`+"\n", string(gotResp))
+
+		_, err = client18.Write([]byte(`{"request":"abort","id":10001}` + "\n"))
+		require.NoError(t, err)
+
+		gotResp, err = bufRdr18.ReadBytes('\n')
+		require.NoError(t, err)
+		require.JSONEq(t, `{"status":"no-job"}`+"\n", string(gotResp))
 	})
 }
