@@ -3,6 +3,7 @@ package jobcentre_test
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"log"
 	"net"
 	"sync"
@@ -161,22 +162,21 @@ func TestErrors(t *testing.T) {
 }
 
 func TestServerErrors(t *testing.T) {
+	type (
+		clientID   int
+		ReqResPair struct {
+			req      string
+			wantResp string
+			clientID clientID
+			label    string
+		}
+
+		gotResp struct {
+			clientID clientID
+			resp     string
+		}
+	)
 	t.Run("unable to abort already deleted job part 2", func(t *testing.T) {
-		type (
-			clientID   int
-			ReqResPair struct {
-				req      string
-				wantResp string
-				clientID clientID
-				label    string
-			}
-
-			gotResp struct {
-				clientID clientID
-				resp     string
-			}
-		)
-
 		const (
 			clientID0 clientID = iota
 			clientID1
@@ -304,6 +304,123 @@ func TestServerErrors(t *testing.T) {
 		for i, got := range clientResponses {
 			require.Equal(t, requests[i].clientID, got.clientID, requests[i].label)
 			require.JSONEq(t, requests[i].wantResp+"\n", got.resp, requests[i].label)
+		}
+	})
+
+	t.Run("assign job to only one client, even if one is waiting", func(t *testing.T) {
+		const (
+			clientAlpha clientID = iota
+			clientBravo
+		)
+
+		addr := ":9997"
+		srv := &jcp.Server{
+			Addr:    addr,
+			Handler: jobcentre.NewApp(inmem.NewStore()),
+		}
+
+		go func() {
+			_ = srv.ListenAndServe()
+		}()
+
+		defer srv.Close(context.Background())
+
+		time.Sleep(100 * time.Millisecond)
+
+		requests := []ReqResPair{
+			{
+				req:      `{"pri":100,"queue":"q-31hlLeih","request":"put","job":{"title":"j-llEdLIEk"}}`,
+				wantResp: `{"status":"ok","id":10001}`,
+				clientID: clientAlpha,
+				label:    "[0] PUT j-llEdLIEk",
+			},
+			{
+				req:      `{"queues":["q-hotdogs"],"request":"get", "wait":true}`,
+				wantResp: `{"status":"ok","id":10002,"job":{"title":"j-coney"},"queue":"q-hotdogs","pri":100}`,
+				clientID: clientAlpha,
+				label:    "[0] GET - wait 10002",
+			},
+			{
+				req:      `{"id": 10002,"request":"delete"}`,
+				wantResp: `{"status":"ok"}`,
+				clientID: clientAlpha,
+				label:    "[0] DELETE 10002",
+			},
+			{
+				req:      `{"queue":"q-hotdogs","pri":100,"job":{"title":"j-coney"},"request":"put"}`,
+				wantResp: `{"status":"ok","id":10002}`,
+				clientID: clientBravo,
+				label:    "[1] PUT j-coney",
+			},
+			{
+				req:      `{"queues":["q-hotdogs"],"request":"get", "wait":false}`,
+				wantResp: `{"status":"no-job"}`,
+				clientID: clientBravo,
+				label:    "[1] GET - wait",
+			},
+		}
+
+		clientA, err := net.Dial("tcp", addr)
+		require.NoError(t, err)
+
+		clientB, err := net.Dial("tcp", addr)
+		require.NoError(t, err)
+
+		bufRdrA := bufio.NewReader(clientA)
+		bufRdrB := bufio.NewReader(clientB)
+
+		var mu sync.Mutex
+		alphaResponses := make([]gotResp, 0, len(requests))
+		bravoResponses := make([]gotResp, 0, len(requests))
+
+		wg := sync.WaitGroup{}
+		wg.Add(len(requests))
+		go func() {
+			for {
+				resp, err := bufRdrA.ReadBytes('\n')
+				require.NoError(t, err)
+				mu.Lock()
+				alphaResponses = append(alphaResponses, gotResp{clientID: clientAlpha, resp: string(resp)})
+				mu.Unlock()
+				wg.Done()
+			}
+		}()
+
+		go func() {
+			for {
+				resp, err := bufRdrB.ReadBytes('\n')
+				require.NoError(t, err)
+				mu.Lock()
+				bravoResponses = append(bravoResponses, gotResp{clientID: clientBravo, resp: string(resp)})
+				mu.Unlock()
+				wg.Done()
+			}
+		}()
+
+		for _, reqResp := range requests {
+			client := clientA
+			if reqResp.clientID == clientBravo {
+				client = clientB
+			}
+			_, err := client.Write([]byte(reqResp.req + "\n"))
+			require.NoError(t, err)
+
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		wg.Wait()
+		iAlpha := 0
+		iBravo := 0
+		for _, req := range requests {
+			testLabel := fmt.Sprintf("%s\nwant: %s", req.label, req.wantResp)
+			switch req.clientID {
+			case clientAlpha:
+				require.JSONEq(t, req.wantResp+"\n", alphaResponses[iAlpha].resp, testLabel)
+				iAlpha++
+			case clientBravo:
+				require.JSONEq(t, req.wantResp+"\n", bravoResponses[iBravo].resp, testLabel)
+				iBravo++
+			}
 		}
 	})
 }

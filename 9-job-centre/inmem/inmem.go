@@ -136,6 +136,9 @@ func (s *Store) notify(queueName string) {
 func (s *Store) NextJob(ctx context.Context, clientID uint64, queueNames []string, wait bool) (Job, string, error) {
 	highestPriJob := Job{Pri: 0}
 	queueName := ""
+	// Need to hold the lock until the job is dequeued,
+	// or the next client could dequeue the same job between the peek and dequeue.
+	s.qMu.Lock()
 	for _, name := range queueNames {
 		j, err := s.peek(ctx, name)
 		if err != nil {
@@ -152,10 +155,12 @@ func (s *Store) NextJob(ctx context.Context, clientID uint64, queueNames []strin
 	}
 
 	if highestPriJob.Pri == math.MaxInt64 {
+		s.qMu.Unlock()
 		return Job{}, "", ErrNoJob
 	}
 
 	_, err := s.dequeue(ctx, clientID, queueName)
+	s.qMu.Unlock()
 	if err != nil && err != ErrNoJob {
 		return Job{}, "", fmt.Errorf("s.dequeue: %w", err)
 	}
@@ -166,9 +171,8 @@ func (s *Store) NextJob(ctx context.Context, clientID uint64, queueNames []strin
 
 		// Wait for a job to be added to the queue
 		ready := make(chan string)
-		s.qMu.Lock()
+
 		s.waiting[clientID] = waiter{queueNames: queueNames, ready: ready}
-		s.qMu.Unlock()
 
 		log.Printf("[%d] waiting for next job...\n", clientID)
 		queueName = <-ready
@@ -176,9 +180,9 @@ func (s *Store) NextJob(ctx context.Context, clientID uint64, queueNames []strin
 
 		s.qMu.Lock()
 		delete(s.waiting, clientID)
-		s.qMu.Unlock()
 
 		nextJob, err := s.dequeue(ctx, clientID, queueName)
+		s.qMu.Unlock()
 		if err != nil {
 			return Job{}, "", fmt.Errorf("s.dequeue: %w", err)
 		}
@@ -231,8 +235,6 @@ func (s *Store) GetAssignedJob(ctx context.Context, clientID uint64) (Job, error
 
 // peek retrieves the highest priority job of the named queue. The job is left in the queue.
 func (s *Store) peek(ctx context.Context, queueName string) (Job, error) {
-	s.qMu.Lock()
-	defer s.qMu.Unlock()
 	curQ, ok := s.queues[queueName]
 	if !ok {
 		return Job{}, ErrNoJob
@@ -245,8 +247,6 @@ func (s *Store) peek(ctx context.Context, queueName string) (Job, error) {
 
 // dequeue remove the job from the queue and adds it to the store's assigned map.
 func (s *Store) dequeue(ctx context.Context, clientID uint64, queueName string) (Job, error) {
-	s.qMu.Lock()
-	defer s.qMu.Unlock()
 	q, ok := s.queues[queueName]
 	if !ok {
 		return Job{}, ErrNoJob
