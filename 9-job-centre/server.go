@@ -116,7 +116,6 @@ func (s *Server) ServeJCP(ctx context.Context, w jcp.JCPResponseWriter, r *jcp.R
 
 	select {
 	case <-ctx.Done():
-		s.log.Printf("[%d] context done: %v", clientID, context.Cause(ctx))
 		// TODO: Abort any jobs that are currently being worked on by this client.
 		assigned, err := s.store.GetAssignedJob(ctx, clientID)
 		if err == inmem.ErrNoJob {
@@ -292,7 +291,7 @@ func (s *Server) delete(ctx context.Context, w jcp.JCPResponseWriter, r *DeleteR
 
 // errorResponse creates an ErrorResponse from an error. If msgs is omitted, the error's message is used.
 func errorResponse(err error, msgs ...string) Response {
-	if err == inmem.ErrNoJob {
+	if errors.Is(err, inmem.ErrNoJob) {
 		return Response{Status: statusNoJob}
 	}
 
