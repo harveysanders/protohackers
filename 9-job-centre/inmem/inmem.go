@@ -172,7 +172,9 @@ func (s *Store) NextJob(ctx context.Context, clientID uint64, queueNames []strin
 		// Wait for a job to be added to the queue
 		ready := make(chan string)
 
+		s.qMu.Lock()
 		s.waiting[clientID] = waiter{queueNames: queueNames, ready: ready}
+		s.qMu.Unlock()
 
 		log.Printf("[%d] waiting for next job...\n", clientID)
 		queueName = <-ready
