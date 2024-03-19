@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 
@@ -8,18 +9,19 @@ import (
 )
 
 func main() {
-
 	port := "9876"
 	if PORT := os.Getenv("PORT"); PORT != "" {
 		port = PORT
 	}
+
+	addr := fmt.Sprintf(":%s", port)
 	srv := vcs.New()
 
-	l, err := srv.Start(":" + port)
+	fmt.Printf("Voracious Code Storage server starting on %s...\n", addr)
+	err := srv.Start(addr)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	defer l.Close()
-
+	_ = srv.Close()
 }

@@ -1,22 +1,25 @@
 package vcs
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"strconv"
 )
 
 type (
-	Server struct{}
+	Server struct {
+		listener net.Listener
+	}
 
 	Message struct {
-		method     string // "PUT"
-		filePath   string // "/test.txt"
-		contents   []byte // ASCII
-		contentLen int    // 14
+		method       string // "PUT"
+		filePath     string // "/test.txt"
+		contents     []byte // ASCII
+		contentLen   int    // 14
+		needsContent bool
 	}
 )
 
@@ -24,11 +27,13 @@ func New() *Server {
 	return &Server{}
 }
 
-func (s *Server) Start(port string) (net.Listener, error) {
-	l, err := net.Listen("tcp", port)
+func (s *Server) Start(address string) error {
+	l, err := net.Listen("tcp", address)
 	if err != nil {
-		return l, err
+		return err
 	}
+
+	s.listener = l
 
 	for {
 		c, err := l.Accept()
@@ -40,6 +45,10 @@ func (s *Server) Start(port string) (net.Listener, error) {
 	}
 }
 
+func (s *Server) Close() error {
+	return s.listener.Close()
+}
+
 func (s *Server) handleConnection(c net.Conn) {
 	n, err := c.Write([]byte("READY\n"))
 	if err != nil {
@@ -48,32 +57,45 @@ func (s *Server) handleConnection(c net.Conn) {
 	}
 	fmt.Printf("wrote %d bytes to client\n", n)
 
-	// TODO: Read line by line
-	rawMsg, err := io.ReadAll(c)
-	if err != nil {
-		log.Printf("readAll: %v", err)
-		return
-	}
-
-	fmt.Printf("incoming:\n%s\n", rawMsg)
-	fmt.Printf("bytes:\n%v\n", rawMsg)
-
 	var m Message
-	err = m.parse(rawMsg)
-	if err != nil {
-		log.Printf("parse: %v", err)
-		return
-	}
+	scr := bufio.NewScanner(c)
+	for scr.Scan() {
+		if scr.Err() != nil {
+			log.Printf("scan: %v", scr.Err())
+			return
+		}
 
+		line := scr.Bytes()
+		// Replace the newline
+		line = append(line, '\n')
+		if err != nil {
+			log.Printf("readAll: %v", err)
+			return
+		}
+
+		fmt.Printf("incoming:\n%s\n", line)
+		if m.needsContent {
+			err = m.parseContent(line)
+		} else {
+			err = m.parseMeta(line)
+		}
+		if err != nil {
+			log.Printf("parse: %v", err)
+			return
+		}
+
+		fmt.Printf("msg: %+v\n", m)
+		n, err := c.Write([]byte("READY\n"))
+		if err != nil {
+			log.Printf("write: %v", err)
+			return
+		}
+		fmt.Printf("wrote %d bytes to client\n", n)
+	}
 }
 
-func (m *Message) parse(raw []byte) error {
-	lines := bytes.SplitN(raw, []byte("\n"), 2)
-	if len(lines) < 2 {
-		return fmt.Errorf("expected at least 2 lines, got %d", len(lines))
-	}
-
-	fields := bytes.Fields(lines[0])
+func (m *Message) parseMeta(line []byte) error {
+	fields := bytes.Fields(line)
 
 	fmt.Printf("fields: %+v\n", fields)
 	m.method = string(fields[0])
@@ -83,11 +105,18 @@ func (m *Message) parse(raw []byte) error {
 		return fmt.Errorf("atoi: %w", err)
 	}
 	m.contentLen = contentLen
-
-	contents := lines[1]
-	if len(contents) < contentLen {
-		return fmt.Errorf("expected content length of %d bytes, got %d", contentLen, len(contents))
+	if m.contentLen > 0 {
+		m.needsContent = true
 	}
-	m.contents = contents[:contentLen]
+	return nil
+}
+
+func (m *Message) parseContent(line []byte) error {
+	contents := line
+	if len(contents) < m.contentLen {
+		return fmt.Errorf("expected content length of %d bytes, got %d", m.contentLen, len(contents))
+	}
+	m.contents = contents[:m.contentLen]
+	m.needsContent = false
 	return nil
 }

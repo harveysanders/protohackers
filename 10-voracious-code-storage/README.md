@@ -32,6 +32,15 @@ A _revision number_ begins with a `r` followed by an `int`. Revision numbers sta
 
 ### Methods
 
+#### `HELP`:
+
+Request usage information. No args. The server should respond with a `OK` line followed by a usage message containing the available request methods, delimited by `|` character.
+
+```
+<-- HELP\n
+--> OK usage: HELP|GET|PUT|LIST\n
+```
+
 #### `PUT`:
 
 `PUT` messages consist of the following parts, separated by a single space ` ` character. The first line of a `PUT` message is the header, which contains the `PUT`, _filepath_, and _content-length_. The subsequent line contains the file contents and should be the same length as _content-length_ in the header.
@@ -46,7 +55,11 @@ A _revision number_ begins with a `r` followed by an `int`. Revision numbers sta
 Ex:
 
 ```
-PUT /test.txt 6\nhello\n
+--> READY\n
+<-- PUT /test.txt 14\n
+<-- Hello, world!\n
+--> OK r1\n
+--> READY
 ```
 
 The server should respond with an `OK` followed by the _revision number_.
@@ -80,11 +93,35 @@ Revision number omitted. Latest revision returned:
 --> READY\n
 ```
 
+#### `LIST`:
+
+`LIST` messages contain the method `LIST` followed by a directory. The server should respond with a `OK` line followed by an _int_ corresponding to the number of entries in the given directory.
+The next line(s) should list the entries, one entry per line. If the entry is a file, the listing contains the **file name** and the **latest revision number**. If the listing is a directory, the line contains the directory's name and the string `"DIR"`. The list should be terminated by a `READY` line.
+
+Example:
+For a directory containing two files and one directory:
+
+```
+/
+├── dir1
+├── test.txt
+└── test2.txt
+```
+
+```
+LIST /
+OK 3
+dir1/ DIR
+test.txt r1
+test2.txt r1
+```
+
 ### Example Session
 
 Client messages denoted with `<--`. Server responses denoted with `-->`.
 
 ```
+
 --> READY\n
 <-- PUT /test.txt 14\n
 <-- hello, world!\n
@@ -98,4 +135,5 @@ Client messages denoted with `<--`. Server responses denoted with `-->`.
 --> OK 14\n
 --> hello, world!\n
 --> READY\n
+
 ```

@@ -31,6 +31,59 @@
       "env": {
         "PORT": "9000"
       }
+    },
+    {
+      "name": "06 - Speed Daemon",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/6-speed-daemon/cmd",
+      "env": {
+        "PORT": "9000"
+      }
+    },
+    {
+      "name": "07 - Line Reverse",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/linereverse/cmd",
+      "env": {
+        "HOST": "0.0.0.0",
+        "PORT": "9000"
+      }
+    },
+    {
+      "name": "08 - Insecure Sockets Layer",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/8-insecure-sockets-layer/cmd",
+      "env": {
+        "HOST": "0.0.0.0",
+        "PORT": "9000"
+      }
+    },
+    {
+      "name": "09 - Job Centre",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/9-job-centre/cmd",
+      "env": {
+        "HOST": "0.0.0.0",
+        "PORT": "9000"
+      }
+    },
+    {
+      "name": "10 - Voracious Code Storage",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/10-voracious-code-storage/cmd",
+      "env": {
+        "PORT": "9000"
+      }
     }
   ]
 }
