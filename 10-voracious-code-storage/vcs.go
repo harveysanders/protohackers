@@ -3,15 +3,19 @@ package vcs
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"strconv"
+
+	"github.com/harveysanders/protohackers/10-voracious-code-storage/inmem"
 )
 
 type (
 	Server struct {
 		listener net.Listener
+		store    inmem.Store
 	}
 
 	Message struct {
@@ -24,7 +28,9 @@ type (
 )
 
 func New() *Server {
-	return &Server{}
+	return &Server{
+		store: *inmem.New(),
+	}
 }
 
 func (s *Server) Start(address string) error {
@@ -38,8 +44,10 @@ func (s *Server) Start(address string) error {
 	for {
 		c, err := l.Accept()
 		if err != nil {
-			log.Printf("CLIENT: %v", err)
-			continue
+			if !errors.Is(err, net.ErrClosed) {
+				log.Printf("CLIENT: %v", err)
+			}
+			return err
 		}
 		go s.handleConnection(c)
 	}
@@ -50,54 +58,70 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) handleConnection(c net.Conn) {
-	n, err := c.Write([]byte("READY\n"))
+	_, err := c.Write([]byte("READY\n"))
 	if err != nil {
 		log.Printf("write: %v", err)
 		return
 	}
-	fmt.Printf("wrote %d bytes to client\n", n)
 
-	var m Message
+	var msg Message
 	scr := bufio.NewScanner(c)
 	for scr.Scan() {
-		if scr.Err() != nil {
-			log.Printf("scan: %v", scr.Err())
-			return
-		}
-
 		line := scr.Bytes()
 		// Replace the newline
 		line = append(line, '\n')
-		if err != nil {
-			log.Printf("readAll: %v", err)
-			return
-		}
 
-		fmt.Printf("incoming:\n%s\n", line)
-		if m.needsContent {
-			err = m.parseContent(line)
+		log.Printf("incoming:\n%s\n", line)
+
+		// Should be on 2nd line of a PUT request
+		if msg.needsContent {
+			if err = msg.parseContent(line); err != nil {
+				log.Printf("parseContent: %v", err)
+				return
+			}
+			msg.needsContent = false
+			_, rev, err := s.store.CreateRevision(msg.filePath, bytes.NewReader(msg.contents))
+			if err != nil {
+				log.Printf("CreateRevision: %v", err)
+				return
+			}
+			_, err = c.Write([]byte(fmt.Sprintf("OK %s\n", rev)))
+			if err != nil {
+				log.Printf("write: %v", err)
+				return
+			}
 		} else {
-			err = m.parseMeta(line)
-		}
-		if err != nil {
-			log.Printf("parse: %v", err)
-			return
+			// First pass
+			// Reset the message
+			msg = Message{}
+			err = msg.parseMeta(line)
+			if err != nil {
+				log.Printf("parseMeta: %v", err)
+				return
+			}
 		}
 
-		fmt.Printf("msg: %+v\n", m)
-		n, err := c.Write([]byte("READY\n"))
+		if msg.needsContent {
+			// Get the next line to read the contents
+			continue
+		}
+
+		_, err := c.Write([]byte("READY\n"))
 		if err != nil {
 			log.Printf("write: %v", err)
 			return
 		}
-		fmt.Printf("wrote %d bytes to client\n", n)
+
+	}
+	if scr.Err() != nil {
+		log.Printf("scan: %v", scr.Err())
+		return
 	}
 }
 
 func (m *Message) parseMeta(line []byte) error {
 	fields := bytes.Fields(line)
 
-	fmt.Printf("fields: %+v\n", fields)
 	m.method = string(fields[0])
 	m.filePath = string(fields[1])
 	contentLen, err := strconv.Atoi(string(fields[2]))

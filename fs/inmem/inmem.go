@@ -51,7 +51,6 @@ func (f *FS) Open(name string) (fs.File, error) {
 
 	path, filename := path.Split(name)
 	dirs := strings.Split(strings.TrimSuffix(path, string(os.PathSeparator)), string(os.PathSeparator))
-	fmt.Println(filename, dirs)
 
 	// Recursively traverse the map
 	file, err := open(dirs, filename, f.root)
@@ -150,7 +149,6 @@ func (f *FS) WriteFile(filePath string, data []byte, perm fs.FileMode) error {
 
 	dirPath, fileName := path.Split(filePath)
 	dirs := strings.Split(strings.TrimSuffix(dirPath, string(os.PathSeparator)), string(os.PathSeparator))
-	fmt.Println(fileName, dirs)
 
 	// Recursively directory creation traverse the map
 	newRoot, err := writeFile(dirs, fileName, data, f.root)
