@@ -3,6 +3,7 @@ package inmem
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"sync"
 
 	"github.com/harveysanders/protohackers/fs/inmem"
@@ -10,12 +11,19 @@ import (
 
 var appDirName = "vcs"
 
+var ErrNotFound = fmt.Errorf("not found")
+
+type revision struct {
+	privatePath string
+	id          string
+}
+
 type Store struct {
 	mu sync.RWMutex
 	// Map of public file paths to a map revision IDs to private file paths.
 	// Ex:
 	//  "/test.txt" -> {"r1": "/tmp/test.txt.r1"}
-	revs map[string]map[string]string
+	revs map[string][]revision
 	fs   *inmem.FS
 }
 
@@ -25,7 +33,7 @@ type Option func(*Store)
 func New(opts ...Option) *Store {
 	s := &Store{
 		mu:   sync.RWMutex{},
-		revs: make(map[string]map[string]string, 512),
+		revs: make(map[string][]revision, 512),
 		fs:   inmem.New(),
 	}
 	for _, o := range opts {
@@ -44,7 +52,7 @@ func (s *Store) CreateRevision(filepath string, r io.Reader) (int64, string, err
 	revs, ok := s.revs[filepath]
 
 	if !ok {
-		revs = make(map[string]string, 4)
+		revs = make([]revision, 0, 4)
 		s.revs[publicPath] = revs
 	} else {
 		revN = len(revs)
@@ -62,8 +70,32 @@ func (s *Store) CreateRevision(filepath string, r io.Reader) (int64, string, err
 		return 0, revisionTag, fmt.Errorf("io.Copy: %w", err)
 	}
 
-	revs[revisionTag] = privatePath
+	revs = append(revs, revision{id: revisionTag, privatePath: privatePath})
 	s.revs[publicPath] = revs
 
 	return int64(len(contents)), revisionTag, nil
+}
+
+func (s *Store) GetRevision(filepath, revID string) (fs.File, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	revs, ok := s.revs[filepath]
+	if !ok || len(revs) == 0 {
+		return nil, fmt.Errorf("no revisions for %s", filepath)
+	}
+
+	if revID == "" {
+		latest := revs[len(revs)-1]
+		return s.fs.Open(latest.privatePath)
+	}
+
+	for _, r := range revs {
+		if r.id == revID {
+			return s.fs.Open(r.privatePath)
+		}
+	}
+
+	return nil, fmt.Errorf("no revision %s for %s", revID, filepath)
+
 }

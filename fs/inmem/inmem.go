@@ -222,7 +222,7 @@ func (f *File) Close() error {
 }
 
 func (f *File) Stat() (fs.FileInfo, error) {
-	return nil, nil
+	return f, nil
 }
 
 func (f *File) IsDir() bool {

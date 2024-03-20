@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"strconv"
@@ -27,21 +28,23 @@ type (
 	}
 
 	RequestPut struct {
-		method     string // "PUT"
+		method     string // Method type, always "PUT".
 		filePath   string // "/test.txt"
-		contents   []byte // ASCII
+		contents   []byte // ASCII encoded file contents.
 		contentLen int    // 14
 	}
 
 	RequestGet struct {
-		method   string // "GET"
-		filePath string // "/test.txt"
+		method   string // Method Type, always "GET".
+		filePath string // File path Ex: "/test.txt"
+		rev      string // Optional revision number. If omitted, use latest. Ex: "r1"
 	}
 
 	Conn struct {
 		conn net.Conn
 		s    *Server
 		rdr  *bufio.Reader
+		w    *bufio.Writer
 	}
 )
 
@@ -80,14 +83,18 @@ func (s *Server) handleConnection(nc net.Conn) {
 		conn: nc,
 		s:    s,
 		rdr:  bufio.NewReader(nc),
+		w:    bufio.NewWriter(nc),
 	}
 
 	defer c.conn.Close()
 
 	// Send the initial READY message
-	_, err := c.conn.Write([]byte("READY\n"))
-	if err != nil {
+	if _, err := c.w.WriteString("READY\n"); err != nil {
 		log.Printf("write: %v", err)
+		return
+	}
+	if err := c.w.Flush(); err != nil {
+		log.Printf("Flush: %v", err)
 		return
 	}
 
@@ -114,16 +121,18 @@ func (s *Server) handleConnection(nc net.Conn) {
 		case ReqTypeList:
 			c.handleList(line)
 		default:
-			_, err := nc.Write([]byte("ERROR unknown command\n"))
-			if err != nil {
+			if _, err := c.w.WriteString("ERROR unknown command\n"); err != nil {
 				log.Printf("write: %v", err)
 			}
 		}
 
 		// Write "READY" message after handling each request
-		_, err = nc.Write([]byte("READY\n"))
-		if err != nil {
+		if _, err := c.w.WriteString("READY\n"); err != nil {
 			log.Printf("write: %v", err)
+			return
+		}
+		if err := c.w.Flush(); err != nil {
+			log.Printf("Flush: %v", err)
 			return
 		}
 	}
@@ -173,13 +182,16 @@ func (c *Conn) handlePut(line []byte) {
 	}
 }
 
-func (m *RequestGet) unmarshal(line []byte) error {
+func (r *RequestGet) unmarshal(line []byte) error {
 	fields := bytes.Fields(line)
-	if len(fields) != 2 {
+	if len(fields) < 2 {
 		return fmt.Errorf("invalid request: %s", line)
 	}
-	m.method = string(fields[0])
-	m.filePath = string(fields[1])
+	r.method = string(fields[0])
+	r.filePath = string(fields[1])
+	if len(fields) == 3 {
+		r.rev = string(fields[2])
+	}
 	return nil
 }
 
@@ -190,7 +202,30 @@ func (c *Conn) handleGet(line []byte) {
 		return
 	}
 
-	log.Print(req)
+	file, err := c.s.store.GetRevision(req.filePath, req.rev)
+	if err != nil {
+		log.Printf("GetRevision: %v", err)
+		return
+	}
+	stat, err := file.Stat()
+	if err != nil {
+		log.Printf("Stat: %v", err)
+		return
+	}
+	okMsg := fmt.Sprintf("OK %d\n", stat.Size())
+	_, err = c.w.WriteString(okMsg)
+	if err != nil {
+		log.Printf("WriteString: %v", err)
+		return
+	}
+	if _, err := io.Copy(c.w, file); err != nil {
+		log.Printf("io.Copy: %v", err)
+		return
+	}
+	if err = c.w.Flush(); err != nil {
+		log.Printf("Flush: %v", err)
+		return
+	}
 }
 
 func (c *Conn) handleList(line []byte) {
