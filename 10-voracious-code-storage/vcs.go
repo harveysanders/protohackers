@@ -8,8 +8,16 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"strings"
 
 	"github.com/harveysanders/protohackers/10-voracious-code-storage/inmem"
+)
+
+const (
+	ReqTypeGet  = "GET"
+	ReqTypePut  = "PUT"
+	ReqTypeList = "LIST"
+	ReqTypeHelp = "HELP"
 )
 
 type (
@@ -18,12 +26,22 @@ type (
 		store    inmem.Store
 	}
 
-	Message struct {
-		method       string // "PUT"
-		filePath     string // "/test.txt"
-		contents     []byte // ASCII
-		contentLen   int    // 14
-		needsContent bool
+	RequestPut struct {
+		method     string // "PUT"
+		filePath   string // "/test.txt"
+		contents   []byte // ASCII
+		contentLen int    // 14
+	}
+
+	RequestGet struct {
+		method   string // "GET"
+		filePath string // "/test.txt"
+	}
+
+	Conn struct {
+		conn net.Conn
+		s    *Server
+		rdr  *bufio.Reader
 	}
 )
 
@@ -57,69 +75,61 @@ func (s *Server) Close() error {
 	return s.listener.Close()
 }
 
-func (s *Server) handleConnection(c net.Conn) {
-	_, err := c.Write([]byte("READY\n"))
+func (s *Server) handleConnection(nc net.Conn) {
+	c := &Conn{
+		conn: nc,
+		s:    s,
+		rdr:  bufio.NewReader(nc),
+	}
+
+	defer c.conn.Close()
+
+	// Send the initial READY message
+	_, err := c.conn.Write([]byte("READY\n"))
 	if err != nil {
 		log.Printf("write: %v", err)
 		return
 	}
 
-	var msg Message
-	scr := bufio.NewScanner(c)
-	for scr.Scan() {
-		line := scr.Bytes()
-		// Replace the newline
-		line = append(line, '\n')
-
-		log.Printf("incoming:\n%s\n", line)
-
-		// Should be on 2nd line of a PUT request
-		if msg.needsContent {
-			if err = msg.parseContent(line); err != nil {
-				log.Printf("parseContent: %v", err)
-				return
-			}
-			msg.needsContent = false
-			_, rev, err := s.store.CreateRevision(msg.filePath, bytes.NewReader(msg.contents))
-			if err != nil {
-				log.Printf("CreateRevision: %v", err)
-				return
-			}
-			_, err = c.Write([]byte(fmt.Sprintf("OK %s\n", rev)))
-			if err != nil {
-				log.Printf("write: %v", err)
-				return
-			}
-		} else {
-			// First pass
-			// Reset the message
-			msg = Message{}
-			err = msg.parseMeta(line)
-			if err != nil {
-				log.Printf("parseMeta: %v", err)
-				return
-			}
+	for {
+		line, err := c.rdr.ReadBytes('\n')
+		if err != nil {
+			log.Printf("rdr.RadBytes: %v", err)
+			return
 		}
 
-		if msg.needsContent {
-			// Get the next line to read the contents
+		fields := bytes.Fields(line)
+		if len(fields) == 0 {
 			continue
 		}
 
-		_, err := c.Write([]byte("READY\n"))
+		reqType := string(fields[0])
+		switch reqType {
+		case ReqTypeHelp:
+			c.handleHelp()
+		case ReqTypePut:
+			c.handlePut(line)
+		case ReqTypeGet:
+			c.handleGet(line)
+		case ReqTypeList:
+			c.handleList(line)
+		default:
+			_, err := nc.Write([]byte("ERROR unknown command\n"))
+			if err != nil {
+				log.Printf("write: %v", err)
+			}
+		}
+
+		// Write "READY" message after handling each request
+		_, err = nc.Write([]byte("READY\n"))
 		if err != nil {
 			log.Printf("write: %v", err)
 			return
 		}
-
-	}
-	if scr.Err() != nil {
-		log.Printf("scan: %v", scr.Err())
-		return
 	}
 }
 
-func (m *Message) parseMeta(line []byte) error {
+func (m *RequestPut) unmarshal(line []byte) error {
 	fields := bytes.Fields(line)
 
 	m.method = string(fields[0])
@@ -129,18 +139,71 @@ func (m *Message) parseMeta(line []byte) error {
 		return fmt.Errorf("atoi: %w", err)
 	}
 	m.contentLen = contentLen
-	if m.contentLen > 0 {
-		m.needsContent = true
-	}
 	return nil
 }
 
-func (m *Message) parseContent(line []byte) error {
-	contents := line
-	if len(contents) < m.contentLen {
-		return fmt.Errorf("expected content length of %d bytes, got %d", m.contentLen, len(contents))
+func (c *Conn) handlePut(line []byte) {
+	var req RequestPut
+	err := req.unmarshal(line)
+	if err != nil {
+		log.Printf("parseMeta: %v", err)
+		return
 	}
-	m.contents = contents[:m.contentLen]
-	m.needsContent = false
+
+	req.contents = make([]byte, 0, req.contentLen)
+	for bytesRead := 0; bytesRead < req.contentLen; {
+		line, err := c.rdr.ReadBytes('\n')
+		if err != nil {
+			log.Printf("rdr.ReadBytes: %v", err)
+			return
+		}
+		req.contents = append(req.contents, line...)
+		bytesRead += len(line)
+	}
+
+	_, rev, err := c.s.store.CreateRevision(req.filePath, bytes.NewReader(req.contents))
+	if err != nil {
+		log.Printf("CreateRevision: %v", err)
+		return
+	}
+	_, err = c.conn.Write([]byte(fmt.Sprintf("OK %s\n", rev)))
+	if err != nil {
+		log.Printf("write: %v", err)
+		return
+	}
+}
+
+func (m *RequestGet) unmarshal(line []byte) error {
+	fields := bytes.Fields(line)
+	if len(fields) != 2 {
+		return fmt.Errorf("invalid request: %s", line)
+	}
+	m.method = string(fields[0])
+	m.filePath = string(fields[1])
 	return nil
+}
+
+func (c *Conn) handleGet(line []byte) {
+	var req RequestGet
+	if err := req.unmarshal(line); err != nil {
+		log.Printf("unmarshal: %v", err)
+		return
+	}
+
+	log.Print(req)
+}
+
+func (c *Conn) handleList(line []byte) {
+	// TODO
+}
+
+func (c *Conn) handleHelp() {
+	methods := strings.Join(
+		[]string{ReqTypePut, ReqTypeGet, ReqTypeList, ReqTypeHelp},
+		"|")
+	_, err := c.conn.Write([]byte(fmt.Sprintf("OK usage: %s\n", methods)))
+	if err != nil {
+		log.Printf("write: %v", err)
+		return
+	}
 }
