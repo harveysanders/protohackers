@@ -27,7 +27,6 @@ type reqResp struct {
 
 func TestServer(t *testing.T) {
 	t.Run("PUT request", func(t *testing.T) {
-
 		addr := ":9999"
 		srv := vcs.New()
 		go func() {
@@ -36,6 +35,7 @@ func TestServer(t *testing.T) {
 		}()
 		defer func() { _ = srv.Close() }()
 
+		// Wait for server to start
 		time.Sleep(500 * time.Millisecond)
 
 		client, err := net.Dial("tcp", addr)
@@ -66,6 +66,26 @@ func TestServer(t *testing.T) {
 				direction: recv,
 				wantResp:  "READY\n",
 				desc:      "PUT complete 'READY' response",
+			},
+			{
+				direction: send,
+				reqMsg:    "GET /test.txt\n",
+				desc:      "GET request",
+			},
+			{
+				direction: recv,
+				wantResp:  "OK 14\n",
+				desc:      "GET response part 1",
+			},
+			{
+				direction: recv,
+				wantResp:  "Hello, World!\n",
+				desc:      "GET response part 2",
+			},
+			{
+				direction: recv,
+				wantResp:  "READY\n",
+				desc:      "GET complete 'READY' response",
 			},
 		}
 
