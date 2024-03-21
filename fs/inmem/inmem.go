@@ -3,6 +3,7 @@ package inmem
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io/fs"
 	"os"
@@ -72,6 +73,9 @@ func open(dirnames []string, fileName string, root Entries) (*File, error) {
 	if len(dirnames) == 1 {
 		if file, ok := root[dirnames[0]]; ok {
 			if fileName == "" {
+				if !file.isDir {
+					panic("file is not a directory")
+				}
 				return file, nil
 			}
 			if file, ok := file.files[fileName]; ok {
@@ -218,6 +222,7 @@ func (f *File) Read(p []byte) (n int, err error) {
 }
 
 func (f *File) Close() error {
+	f.rdr.Reset(bytes.NewReader(f.contents))
 	return nil
 }
 

@@ -45,6 +45,7 @@ type (
 		s    *Server
 		rdr  *bufio.Reader
 		w    *bufio.Writer
+		id   int
 	}
 )
 
@@ -61,16 +62,17 @@ func (s *Server) Start(address string) error {
 	}
 
 	s.listener = l
-
+	connID := 0
 	for {
 		c, err := l.Accept()
 		if err != nil {
 			if !errors.Is(err, net.ErrClosed) {
-				log.Printf("CLIENT: %v", err)
+				log.Printf("[%d] CLIENT: %v", connID, err)
 			}
 			return err
 		}
-		go s.handleConnection(c)
+		go s.handleConnection(c, connID)
+		connID++
 	}
 }
 
@@ -78,8 +80,9 @@ func (s *Server) Close() error {
 	return s.listener.Close()
 }
 
-func (s *Server) handleConnection(nc net.Conn) {
+func (s *Server) handleConnection(nc net.Conn, id int) {
 	c := &Conn{
+		id:   id,
 		conn: nc,
 		s:    s,
 		rdr:  bufio.NewReader(nc),
@@ -90,18 +93,18 @@ func (s *Server) handleConnection(nc net.Conn) {
 
 	// Send the initial READY message
 	if _, err := c.w.WriteString("READY\n"); err != nil {
-		log.Printf("write: %v", err)
+		log.Printf("[%d] write: %v", c.id, err)
 		return
 	}
 	if err := c.w.Flush(); err != nil {
-		log.Printf("Flush: %v", err)
+		log.Printf("[%d] Flush: %v", c.id, err)
 		return
 	}
 
 	for {
 		line, err := c.rdr.ReadBytes('\n')
-		if err != nil {
-			log.Printf("rdr.RadBytes: %v", err)
+		if err != nil && err != io.EOF {
+			log.Printf("[%d] rdr.ReadBytes: %v", c.id, err)
 			return
 		}
 
@@ -122,17 +125,17 @@ func (s *Server) handleConnection(nc net.Conn) {
 			c.handleList(line)
 		default:
 			if _, err := c.w.WriteString("ERROR unknown command\n"); err != nil {
-				log.Printf("write: %v", err)
+				log.Printf("[%d] write: %v", c.id, err)
 			}
 		}
 
 		// Write "READY" message after handling each request
 		if _, err := c.w.WriteString("READY\n"); err != nil {
-			log.Printf("write: %v", err)
+			log.Printf("[%d] write: %v", c.id, err)
 			return
 		}
 		if err := c.w.Flush(); err != nil {
-			log.Printf("Flush: %v", err)
+			log.Printf("[%d] Flush: %v", c.id, err)
 			return
 		}
 	}
@@ -155,7 +158,7 @@ func (c *Conn) handlePut(line []byte) {
 	var req RequestPut
 	err := req.unmarshal(line)
 	if err != nil {
-		log.Printf("parseMeta: %v", err)
+		log.Printf("[%d] parseMeta: %v", c.id, err)
 		return
 	}
 
@@ -163,7 +166,7 @@ func (c *Conn) handlePut(line []byte) {
 	for bytesRead := 0; bytesRead < req.contentLen; {
 		line, err := c.rdr.ReadBytes('\n')
 		if err != nil {
-			log.Printf("rdr.ReadBytes: %v", err)
+			log.Printf("[%d] rdr.ReadBytes: %v", c.id, err)
 			return
 		}
 		req.contents = append(req.contents, line...)
@@ -172,12 +175,12 @@ func (c *Conn) handlePut(line []byte) {
 
 	_, rev, err := c.s.store.CreateRevision(req.filePath, bytes.NewReader(req.contents))
 	if err != nil {
-		log.Printf("CreateRevision: %v", err)
+		log.Printf("[%d] CreateRevision: %v", c.id, err)
 		return
 	}
 	_, err = c.conn.Write([]byte(fmt.Sprintf("OK %s\n", rev)))
 	if err != nil {
-		log.Printf("write: %v", err)
+		log.Printf("[%d] write: %v", c.id, err)
 		return
 	}
 }
@@ -198,32 +201,35 @@ func (r *RequestGet) unmarshal(line []byte) error {
 func (c *Conn) handleGet(line []byte) {
 	var req RequestGet
 	if err := req.unmarshal(line); err != nil {
-		log.Printf("unmarshal: %v", err)
+		log.Printf("[%d] unmarshal: %v", c.id, err)
 		return
 	}
 
 	file, err := c.s.store.GetRevision(req.filePath, req.rev)
 	if err != nil {
-		log.Printf("GetRevision: %v", err)
+		log.Printf("[%d] GetRevision: %v", c.id, err)
 		return
 	}
+	defer func() {
+		_ = file.Close()
+	}()
 	stat, err := file.Stat()
 	if err != nil {
-		log.Printf("Stat: %v", err)
+		log.Printf("[%d] Stat: %v", c.id, err)
 		return
 	}
 	okMsg := fmt.Sprintf("OK %d\n", stat.Size())
 	_, err = c.w.WriteString(okMsg)
 	if err != nil {
-		log.Printf("WriteString: %v", err)
+		log.Printf("[%d] WriteString: %v", c.id, err)
 		return
 	}
 	if _, err := io.Copy(c.w, file); err != nil {
-		log.Printf("io.Copy: %v", err)
+		log.Printf("[%d] io.Copy: %v", c.id, err)
 		return
 	}
 	if err = c.w.Flush(); err != nil {
-		log.Printf("Flush: %v", err)
+		log.Printf("[%d] Flush: %v", c.id, err)
 		return
 	}
 }
@@ -238,7 +244,7 @@ func (c *Conn) handleHelp() {
 		"|")
 	_, err := c.conn.Write([]byte(fmt.Sprintf("OK usage: %s\n", methods)))
 	if err != nil {
-		log.Printf("write: %v", err)
+		log.Printf("[%d] write: %v", c.id, err)
 		return
 	}
 }
