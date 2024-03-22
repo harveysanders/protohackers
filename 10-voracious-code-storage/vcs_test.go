@@ -180,4 +180,154 @@ func TestServer(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("LIST request", func(t *testing.T) {
+		addr := ":9999"
+		srv := vcs.New()
+		go func() {
+			err := srv.Start(addr)
+			fmt.Println(err)
+		}()
+		defer func() { _ = srv.Close() }()
+
+		// Wait for server to start
+		time.Sleep(500 * time.Millisecond)
+
+		clientA, err := net.Dial("tcp", addr)
+		require.NoError(t, err)
+		rdrA := bufio.NewReader(clientA)
+		wA := bufio.NewWriter(clientA)
+
+		clientB, err := net.Dial("tcp", addr)
+		require.NoError(t, err)
+		rdrB := bufio.NewReader(clientB)
+		wB := bufio.NewWriter(clientB)
+
+		clientAReqResp := []reqResp{
+			{
+				direction: recv,
+				wantResp:  "READY\n",
+				desc:      "initial 'READY' response",
+			},
+			{
+				direction: send,
+				reqMsg:    "PUT /test.txt 14\n",
+				desc:      "PUT request part 1",
+			},
+			{
+				direction: send,
+				reqMsg:    "Hello, World!\n",
+				desc:      "PUT request part 2",
+			},
+			{
+				direction: recv,
+				wantResp:  "OK r1\n",
+				desc:      "PUT response",
+			},
+			{
+				direction: recv,
+				wantResp:  "READY\n",
+				desc:      "PUT complete 'READY' response",
+			},
+			{
+				direction: send,
+				reqMsg:    "PUT /test.txt 5\n",
+				desc:      "PUT revision 2",
+			},
+			{
+				direction: send,
+				// reqMsg:    "ጤና ይስጥልኝ\n",
+				reqMsg: "hola\n",
+			},
+			{
+				direction: recv,
+				wantResp:  "OK r2\n",
+				desc:      "PUT response r2",
+			},
+			{
+				direction: recv,
+				wantResp:  "READY\n",
+				desc:      "PUT complete 'READY' response",
+			},
+			{
+				direction: send,
+				reqMsg:    "PUT /abc/test.txt 14\n",
+				desc:      "PUT subdirectory",
+			},
+			{
+				direction: send,
+				reqMsg:    "hola otra vez\n",
+			},
+			{
+				direction: recv,
+				wantResp:  "OK r1\n",
+				desc:      "PUT response r2",
+			},
+		}
+
+		for _, rr := range clientAReqResp {
+			t.Run(rr.desc, func(t *testing.T) {
+				switch rr.direction {
+				case recv:
+					resp, err := rdrA.ReadString('\n')
+					require.NoError(t, err)
+					require.Equal(t, rr.wantResp, resp, rr.desc)
+				case send:
+					_, err := wA.WriteString(rr.reqMsg)
+					require.NoError(t, err)
+					err = wA.Flush()
+					require.NoError(t, err)
+				}
+			})
+		}
+
+		clientBReqResp := []reqResp{
+			{
+				direction: recv,
+				wantResp:  "READY\n",
+				desc:      "initial 'READY' response",
+			},
+			{
+				direction: send,
+				reqMsg:    "LIST /\n",
+				desc:      "LIST request",
+			},
+			{
+				direction: recv,
+				wantResp:  "OK 2\n",
+				desc:      "LIST response part 1",
+			},
+			{
+				direction: recv,
+				wantResp:  "test.txt r2\n",
+				desc:      "LIST response file shows revision 2",
+			},
+			{
+				direction: recv,
+				wantResp:  "abc/ DIR\n",
+				desc:      "LIST response subdirectory",
+			},
+			{
+				direction: recv,
+				wantResp:  "READY\n",
+				desc:      "LIST complete 'READY' response",
+			},
+		}
+
+		for _, rr := range clientBReqResp {
+			t.Run(rr.desc, func(t *testing.T) {
+				switch rr.direction {
+				case recv:
+					resp, err := rdrB.ReadString('\n')
+					require.NoError(t, err)
+					require.Equal(t, rr.wantResp, resp, rr.desc)
+				case send:
+					_, err := wB.WriteString(rr.reqMsg)
+					require.NoError(t, err)
+					err = wB.Flush()
+					require.NoError(t, err)
+				}
+			})
+		}
+	})
 }
