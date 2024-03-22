@@ -4,6 +4,7 @@ package inmem
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -164,6 +165,45 @@ func (f *FS) mkdir(dirnames []string, filename string, root Entries) error {
 	return f.mkdir(dirnames[1:], filename, root[nextDir].files)
 }
 
+func (f *FS) Create(name string) (*File, error) {
+	if err := f.WriteFile(name, nil, 0); err != nil {
+		return nil, err
+	}
+	newFile, err := f.Open(name)
+	file, ok := newFile.(*File)
+	if !ok {
+		return nil, fmt.Errorf("not a File")
+	}
+	return file, err
+}
+
+func (f *FS) OpenFile(name string, flag int, perm os.FileMode) (*File, error) {
+	opened, err := f.Open(name)
+	if err != nil {
+		// If not creating the file, return the error
+		if flag&os.O_CREATE == 0 {
+			return nil, err
+		}
+		// In create mode
+		var pathErr *fs.PathError
+		if !errors.As(err, &pathErr) {
+			return nil, err
+		}
+		// Create the file if it doesn't exist
+		opened, err = f.Create(name)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	file, ok := opened.(*File)
+	if !ok {
+		return nil, fmt.Errorf("not a File")
+	}
+	file.appendMode = flag&os.O_APPEND != 0
+	return file, nil
+}
+
 // WriteFile writes data to a file named by filename.
 func (f *FS) WriteFile(filePath string, data []byte, perm fs.FileMode) error {
 	if filePath == "" {
@@ -270,7 +310,8 @@ type File struct {
 	isDir      bool
 	modifiedAt time.Time
 	// Files in the directory. Is nil if the file is not a directory. The keys are the file names.
-	files Entries
+	files      Entries
+	appendMode bool
 }
 
 func (f *File) Read(p []byte) (n int, err error) {
@@ -278,6 +319,14 @@ func (f *File) Read(p []byte) (n int, err error) {
 		f.rdr = bufio.NewReader(strings.NewReader(string(f.contents)))
 	}
 	return f.rdr.Read(p)
+}
+
+func (f *File) Write(data []byte) (int, error) {
+	if f.appendMode {
+		f.contents = append(f.contents, data...)
+		return len(data), nil
+	}
+	return copy(f.contents, data), nil
 }
 
 func (f *File) Close() error {

@@ -5,7 +5,11 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"os"
+	"path"
 	"regexp"
+	"slices"
+	"strings"
 	"sync"
 
 	"github.com/harveysanders/protohackers/fs/inmem"
@@ -20,6 +24,8 @@ type revision struct {
 
 type Store struct {
 	fileRevRegex *regexp.Regexp
+	// Path to the directory where revisions are stored.
+	revisionsDir string
 	mu           sync.RWMutex
 	// Map of public file paths to a map revision IDs to private file paths.
 	// Ex:
@@ -34,6 +40,7 @@ type Option func(*Store)
 func New(opts ...Option) *Store {
 	fileRevRegex := regexp.MustCompile(`\.r\d+$`)
 	s := &Store{
+		revisionsDir: "/.revisions",
 		fileRevRegex: fileRevRegex,
 		mu:           sync.RWMutex{},
 		revs:         make(map[string][]revision, 512),
@@ -46,6 +53,10 @@ func New(opts ...Option) *Store {
 	return s
 }
 
+// CreateRevision creates a new revision of the file at the given path. The file contains meta information about the revisions. The revisions are stores in the /.revisions directory.
+// Ex:
+//
+//	"/tmp/test.txt" -> "/tmp/test.txt
 func (s *Store) CreateRevision(filepath string, r io.Reader) (int64, string, error) {
 	publicPath := filepath
 	var revN int
@@ -62,18 +73,29 @@ func (s *Store) CreateRevision(filepath string, r io.Reader) (int64, string, err
 	}
 
 	revisionTag := fmt.Sprintf("r%d", revN+1)
-	privatePath := fmt.Sprintf("%s.%s", publicPath, revisionTag)
+	revisionPath := path.Join(s.revisionsDir, filepath+"."+revisionTag)
 
 	contents, err := io.ReadAll(r)
 	if err != nil {
 		return 0, "", fmt.Errorf("read contents: %w", err)
 	}
-	err = s.fs.WriteFile(privatePath, contents, 0755)
+	err = s.fs.WriteFile(revisionPath, contents, 0755)
 	if err != nil {
 		return 0, revisionTag, fmt.Errorf("io.Copy: %w", err)
 	}
 
-	revs = append(revs, revision{id: revisionTag, privatePath: privatePath})
+	// If the file doesn't exist, create it, or append to the file
+	f, err := s.fs.OpenFile(publicPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return 0, revisionTag, fmt.Errorf("s.fs.openFile: %q %w", publicPath, err)
+	}
+	metadata := fmt.Sprintf("%s:%s\n", revisionTag, revisionPath)
+	if _, err := f.Write([]byte(metadata)); err != nil {
+		f.Close() // ignore error; Write error takes precedence
+		return 0, revisionTag, fmt.Errorf("f.Write: %w", err)
+	}
+
+	revs = append(revs, revision{id: revisionTag, privatePath: revisionPath})
 	s.revs[publicPath] = revs
 
 	return int64(len(contents)), revisionTag, nil
@@ -119,6 +141,9 @@ func (s *Store) ListEntries(path string) ([]string, error) {
 	res := make([]string, 0, len(entries))
 	for _, e := range entries {
 		if e.IsDir() {
+			if strings.Contains(s.revisionsDir, e.Name()) {
+				continue
+			}
 			res = append(res, fmt.Sprintf("%s/ DIR", e.Name()))
 		} else {
 			ogFileName := s.fileRevRegex.ReplaceAllString(e.Name(), "")
@@ -133,5 +158,6 @@ func (s *Store) ListEntries(path string) ([]string, error) {
 		}
 	}
 
+	slices.Sort(res)
 	return res, nil
 }

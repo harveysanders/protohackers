@@ -299,13 +299,13 @@ func TestServer(t *testing.T) {
 			},
 			{
 				direction: recv,
-				wantResp:  "test.txt r2\n",
-				desc:      "LIST response file shows revision 2",
+				wantResp:  "abc/ DIR\n",
+				desc:      "LIST response subdirectory (should be alpha sorted)",
 			},
 			{
 				direction: recv,
-				wantResp:  "abc/ DIR\n",
-				desc:      "LIST response subdirectory",
+				wantResp:  "test.txt r2\n",
+				desc:      "LIST response file shows revision 2",
 			},
 			{
 				direction: recv,
