@@ -23,20 +23,23 @@ var ErrFileNotFound = fmt.Errorf("file not found")
 type Entries map[string]*File
 
 type FS struct {
-	root map[string]*File
+	root Entries
 	cwd  *File
 }
 
 // New returns a new in-memory file system.
 func New() *FS {
+	rootFile := &File{
+		name:       "/",
+		isDir:      true,
+		modifiedAt: time.Now(),
+		files:      make(Entries, 10),
+	}
+	root := make(Entries, 10)
+	root["/"] = rootFile
 	return &FS{
-		root: make(Entries, 10),
-		cwd: &File{
-			name:       "/",
-			isDir:      true,
-			modifiedAt: time.Now(),
-			files:      make(Entries, 10),
-		},
+		root: root,
+		cwd:  rootFile,
 	}
 }
 
@@ -50,11 +53,14 @@ func (f *FS) Open(name string) (fs.File, error) {
 		return f.cwd, nil
 	}
 
-	path, filename := path.Split(name)
-	dirs := strings.Split(strings.TrimSuffix(path, string(os.PathSeparator)), string(os.PathSeparator))
+	if name == "/" {
+		return f.root["/"], nil
+	}
+
+	dirs, filename := SplitPath(name)
 
 	// Recursively traverse the map
-	file, err := open(dirs, filename, f.root)
+	file, err := f.open(dirs, filename, f.root)
 	if err != nil {
 		if err == ErrFileNotFound {
 			return nil, &fs.PathError{Op: "open", Path: name, Err: err}
@@ -65,9 +71,9 @@ func (f *FS) Open(name string) (fs.File, error) {
 	return file, nil
 }
 
-func open(dirnames []string, fileName string, root Entries) (*File, error) {
+func (f *FS) open(dirnames []string, fileName string, root Entries) (*File, error) {
 	if len(dirnames) == 0 {
-		return nil, ErrInvalidArg
+		dirnames = []string{f.cwd.name}
 	}
 
 	if len(dirnames) == 1 {
@@ -89,7 +95,7 @@ func open(dirnames []string, fileName string, root Entries) (*File, error) {
 		if !file.isDir {
 			return nil, ErrFileNotFound
 		}
-		return open(dirnames[1:], fileName, file.files)
+		return f.open(dirnames[1:], fileName, file.files)
 	}
 	return nil, ErrFileNotFound
 }
@@ -104,15 +110,29 @@ func (f *FS) MkdirAll(name string, perm fs.FileMode) error {
 		return nil
 	}
 
-	path, filename := path.Split(name)
-	dirs := strings.Split(strings.TrimSuffix(path, string(os.PathSeparator)), string(os.PathSeparator))
+	dirs, filename := SplitPath(name)
 	// Recursively directory creation traverse the map
-	return mkdir(dirs, filename, f.root)
+	return f.mkdir(dirs, filename, f.root)
 }
 
-func mkdir(dirnames []string, filename string, root Entries) error {
+func (f *FS) mkdir(dirnames []string, filename string, root Entries) error {
 	if len(dirnames) == 0 {
-		return ErrInvalidArg
+		if filename == "" {
+			return ErrInvalidArg
+		}
+
+		dir, ok := root[f.cwd.name]
+		if !ok {
+			panic("current directory not found")
+		}
+
+		dir.files[filename] = &File{
+			name:       filename,
+			isDir:      true,
+			modifiedAt: time.Now(),
+			files:      make(Entries, 0),
+		}
+		return nil
 	}
 
 	if len(dirnames) == 1 {
@@ -120,6 +140,9 @@ func mkdir(dirnames []string, filename string, root Entries) error {
 			return nil
 		}
 		nextDir := dirnames[0]
+		if nextDir == "" && filename != "" {
+			nextDir = filename
+		}
 		root[nextDir] = &File{
 			name:       nextDir,
 			isDir:      true,
@@ -138,7 +161,7 @@ func mkdir(dirnames []string, filename string, root Entries) error {
 			files:      make(Entries, 10),
 		}
 	}
-	return mkdir(dirnames[1:], filename, root[nextDir].files)
+	return f.mkdir(dirnames[1:], filename, root[nextDir].files)
 }
 
 // WriteFile writes data to a file named by filename.
@@ -151,9 +174,7 @@ func (f *FS) WriteFile(filePath string, data []byte, perm fs.FileMode) error {
 		return nil
 	}
 
-	dirPath, fileName := path.Split(filePath)
-	dirs := strings.Split(strings.TrimSuffix(dirPath, string(os.PathSeparator)), string(os.PathSeparator))
-
+	dirs, fileName := SplitPath(filePath)
 	// Recursively directory creation traverse the map
 	newRoot, err := writeFile(dirs, fileName, data, f.root)
 	if err != nil {
@@ -163,17 +184,53 @@ func (f *FS) WriteFile(filePath string, data []byte, perm fs.FileMode) error {
 	return nil
 }
 
+// SplitPath splits a file path into its directory and file name components.
+// The directory path is returned as a slice of strings, where each element is a directory name.
+func SplitPath(filePath string) ([]string, string) {
+	sep := string(os.PathSeparator)
+	dirPath, fileName := path.Split(filePath)
+	out := strings.Split(dirPath, sep)
+	if strings.HasPrefix(filePath, sep) {
+		out[0] = sep
+	}
+
+	// Remove the extra empty string at the end
+	if len(out) > 0 {
+		return out[:len(out)-1], fileName
+	}
+	return out, fileName
+}
+
+func (f *FS) ReadDir(name string) ([]fs.DirEntry, error) {
+	d, err := f.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	dir, ok := d.(*File)
+	if !ok {
+		return nil, fmt.Errorf("not a File")
+	}
+	if !dir.IsDir() {
+		return nil, fmt.Errorf("not a directory")
+	}
+	entries := make([]fs.DirEntry, 0, len(dir.files))
+	for _, v := range dir.files {
+		entries = append(entries, v)
+	}
+	return entries, nil
+}
+
 func writeFile(dirnames []string, filename string, data []byte, root Entries) (Entries, error) {
 	if len(dirnames) == 0 {
 		return root, ErrInvalidArg
 	}
 
 	if len(dirnames) == 1 {
-		lastDir := dirnames[0]
-		if _, ok := root[lastDir]; !ok {
+		finalDir := dirnames[0]
+		if _, ok := root[finalDir]; !ok {
 			// Create the directory
-			root[lastDir] = &File{
-				name:       lastDir,
+			root[finalDir] = &File{
+				name:       finalDir,
 				isDir:      true,
 				modifiedAt: time.Now(),
 				files:      make(Entries, 0),
@@ -183,7 +240,7 @@ func writeFile(dirnames []string, filename string, data []byte, root Entries) (E
 		// Create the file
 		contents := make([]byte, len(data))
 		copy(contents, data)
-		root[lastDir].files[filename] = &File{
+		root[finalDir].files[filename] = &File{
 			name:       filename,
 			contents:   contents,
 			modifiedAt: time.Now(),
@@ -200,7 +257,9 @@ func writeFile(dirnames []string, filename string, data []byte, root Entries) (E
 			files:      make(Entries, 10),
 		}
 	}
-	return writeFile(dirnames[1:], filename, data, root[nextDir].files)
+	files, err := writeFile(dirnames[1:], filename, data, root[nextDir].files)
+	root[nextDir].files = files
+	return root, err
 }
 
 type File struct {
@@ -252,4 +311,13 @@ func (f *File) ModTime() time.Time {
 
 func (f *File) Sys() any {
 	return nil
+}
+
+// Info implements fs.DirEntry.
+func (f *File) Info() (fs.FileInfo, error) {
+	return f, nil
+}
+
+func (f *File) Type() fs.FileMode {
+	return f.Mode()
 }

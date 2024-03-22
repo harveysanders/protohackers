@@ -22,7 +22,8 @@ func TestOpen(t *testing.T) {
 
 	t.Run("mkdir, then open", func(t *testing.T) {
 		memFS := inmem.New()
-		memFS.MkdirAll("test", 0755)
+		err := memFS.MkdirAll("test", 0755)
+		require.NoError(t, err)
 
 		file, err := memFS.Open("test")
 		require.NoError(t, err)
@@ -43,4 +44,52 @@ func TestOpen(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "hello", string(contents))
 	})
+}
+
+func TestSplitPaths(t *testing.T) {
+	testCases := []struct {
+		name         string
+		path         string
+		wantDirs     []string
+		wantFileName string
+	}{
+		{
+			name:         "root",
+			path:         "/",
+			wantDirs:     []string{"/"},
+			wantFileName: "",
+		},
+		{
+			name:         "file",
+			path:         "/test.txt",
+			wantDirs:     []string{"/"},
+			wantFileName: "test.txt",
+		},
+		{
+			name:         "nested file",
+			path:         "/test/nested.txt",
+			wantDirs:     []string{"/", "test"},
+			wantFileName: "nested.txt",
+		},
+		{
+			name:         "deeper nested file",
+			path:         "/test/abc/nested.txt",
+			wantDirs:     []string{"/", "test", "abc"},
+			wantFileName: "nested.txt",
+		},
+		{
+			name:         "relative path",
+			path:         "test.txt",
+			wantDirs:     []string{""},
+			wantFileName: "test.txt",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			dirs, fileName := inmem.SplitPath(tc.path)
+			require.Equal(t, tc.wantDirs, dirs)
+			require.Equal(t, tc.wantFileName, fileName)
+		})
+	}
 }
