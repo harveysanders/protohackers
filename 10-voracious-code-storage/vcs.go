@@ -40,6 +40,11 @@ type (
 		rev      string // Optional revision number. If omitted, use latest. Ex: "r1"
 	}
 
+	RequestList struct {
+		method string // Method Type, always "LIST".
+		path   string // Path to directory to list. Ex: "/"
+	}
+
 	Conn struct {
 		conn net.Conn
 		s    *Server
@@ -198,6 +203,16 @@ func (r *RequestGet) unmarshal(line []byte) error {
 	return nil
 }
 
+func (r *RequestList) unmarshal(line []byte) error {
+	fields := bytes.Fields(line)
+	if len(fields) < 2 {
+		return fmt.Errorf("invalid request: %s", line)
+	}
+	r.method = string(fields[0])
+	r.path = string(fields[1])
+	return nil
+}
+
 func (c *Conn) handleGet(line []byte) {
 	var req RequestGet
 	if err := req.unmarshal(line); err != nil {
@@ -235,7 +250,28 @@ func (c *Conn) handleGet(line []byte) {
 }
 
 func (c *Conn) handleList(line []byte) {
-	// TODO
+	var req RequestList
+	if err := req.unmarshal(line); err != nil {
+		log.Printf("[%d] unmarshal: %v", c.id, err)
+		return
+	}
+
+	entries, err := c.s.store.ListEntries(req.path)
+	if err != nil {
+		log.Printf("[%d] ListEntries: %v", c.id, err)
+		return
+	}
+	ackLine := fmt.Sprintf("OK %d\n", len(entries))
+	if _, err := c.w.WriteString(ackLine); err != nil {
+		log.Printf("[%d] WriteString: %s %v", c.id, ackLine, err)
+		return
+	}
+	for _, e := range entries {
+		if _, err := c.w.WriteString(e + "\n"); err != nil {
+			log.Printf("[%d] WriteString: %v", c.id, err)
+			return
+		}
+	}
 }
 
 func (c *Conn) handleHelp() {
