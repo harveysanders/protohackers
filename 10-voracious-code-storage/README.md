@@ -44,6 +44,7 @@ Request usage information. No args. The server should respond with a `OK` line f
 #### `PUT`:
 
 `PUT` messages consist of the following parts, separated by a single space ` ` character. The first line of a `PUT` message is the header, which contains the `PUT`, _filepath_, and _content-length_. The subsequent line contains the file contents and should be the same length as _content-length_ in the header.
+Each `PUT` request should increment the revision number for the given _filepath_, _unless the file contents are identical to the previous revision_.
 
 | Description                                   | Type     | Ex. value   |
 | --------------------------------------------- | -------- | ----------- |
@@ -96,7 +97,8 @@ Revision number omitted. Latest revision returned:
 #### `LIST`:
 
 `LIST` messages contain the method `LIST` followed by a directory. The server should respond with a `OK` line followed by an _int_ corresponding to the number of entries in the given directory.
-The next line(s) should list the entries, one entry per line. If the entry is a file, the listing contains the **file name** and the **latest revision number**. If the listing is a directory, the line contains the directory's name and the string `"DIR"`. The list should be terminated by a `READY` line.
+The next line(s) should list the entries, one entry per line. If the entry is a file, the listing contains the **file name** and the **latest revision number**. If the listing is a directory, the line contains the directory's name and the string `"DIR"`. The list should _alphabetically sorted_ by the entry's name.
+The list should be terminated by a `READY` line.
 
 Example:
 For a directory containing two files and one directory:
