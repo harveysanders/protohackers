@@ -2,10 +2,7 @@ package proto
 
 import (
 	"encoding/binary"
-	"errors"
 )
-
-var ErrInvalidFormat = errors.New("invalid binary format")
 
 // Str is a string.
 type Str string
@@ -44,5 +41,12 @@ func (u *U32) UnmarshalBinary(data []byte) error {
 	}
 
 	*u = U32(binary.BigEndian.Uint32(data))
+	return nil
+}
+
+type Element map[string]any
+type Array []Element
+
+func (a *Array) UnmarshalBinary(data []byte) error {
 	return nil
 }
