@@ -31,3 +31,24 @@ func TestMessageHello(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, wantHello, gotHello)
 }
+
+func TestVerifyChecksum(t *testing.T) {
+	testCases := []struct {
+		data []byte
+		want error
+	}{
+		{data: []byte{0x50, // MsgTypeHello{
+			0x00, 0x00, 0x00, 0x19, // (length 25)
+			0x00, 0x00, 0x00, 0x0b, // protocol: (length 11)
+			0x70, 0x65, 0x73, 0x74, // "pest
+			0x63, 0x6f, 0x6e, 0x74, // 	cont
+			0x72, 0x6f, 0x6c, //			 	rol"
+			0x00, 0x00, 0x00, 0x01, // version: 1
+			0xce}, want: nil},
+	}
+
+	for _, tc := range testCases {
+		err := proto.VerifyChecksum(tc.data)
+		require.Equal(t, tc.want, err)
+	}
+}

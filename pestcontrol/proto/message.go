@@ -59,6 +59,17 @@ func (m *Message) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
+func VerifyChecksum(data []byte) error {
+	var sum byte
+	for _, b := range data {
+		sum += b
+	}
+	if sum != 0 {
+		return ErrBadChecksum
+	}
+	return nil
+}
+
 // ToMsgHello converts a message to a MsgHello struct.
 func (m *Message) ToMsgHello() (MsgHello, error) {
 	if m.Type != MsgTypeHello {
