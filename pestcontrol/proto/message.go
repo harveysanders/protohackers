@@ -1,6 +1,7 @@
 package proto
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -35,12 +36,6 @@ type Message struct {
 	Checksum byte    // Checksum of the message. The sum of checksum and all bytes in the message should be 0 (modulo 256).
 }
 
-// MsgHello must be sent by each side as the first message of every session. The values for protocol and version must be "pestcontrol" and 1 respectively.
-type MsgHello struct {
-	Protocol string // Must be "pestcontrol"
-	Version  uint32 // Must be 1
-}
-
 func (m *Message) UnmarshalBinary(data []byte) error {
 	headerLen := 5 // 1 byte for type, 4 bytes for length
 	checksumLen := 1
@@ -59,15 +54,34 @@ func (m *Message) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-func VerifyChecksum(data []byte) error {
-	var sum byte
-	for _, b := range data {
-		sum += b
+func (m *Message) MarshalBinary() ([]byte, error) {
+	data := make([]byte, 0, m.Len)
+	buf := bytes.NewBuffer(data)
+	// Write type
+	if err := buf.WriteByte(byte(m.Type)); err != nil {
+		return nil, err
 	}
-	if sum != 0 {
-		return ErrBadChecksum
+
+	// Write total length
+	if err := binary.Write(buf, binary.BigEndian, m.Len); err != nil {
+		return nil, err
 	}
-	return nil
+
+	// Write content
+	if _, err := buf.Write(m.Content); err != nil {
+		return nil, err
+	}
+
+	if err := buf.WriteByte(calcChecksum(buf.Bytes())); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// MsgHello must be sent by each side as the first message of every session. The values for protocol and version must be "pestcontrol" and 1 respectively.
+type MsgHello struct {
+	Protocol string // Must be "pestcontrol"
+	Version  uint32 // Must be 1
 }
 
 // ToMsgHello converts a message to a MsgHello struct.
@@ -96,4 +110,50 @@ func (m *Message) ToMsgHello() (MsgHello, error) {
 		return hello, fmt.Errorf("unexpected version: %v", hello.Version)
 	}
 	return hello, nil
+}
+
+func (h *MsgHello) MarshalBinary() ([]byte, error) {
+	protocol := "pestcontrol"
+	version := uint32(4)
+	//  "pestcontrol" (11) +  uint32 version (4)
+	contentLen := len(protocol) + 4
+	content := make([]byte, 0, contentLen)
+	content = binary.BigEndian.AppendUint32(content, uint32(contentLen))
+	content = append(content, []byte(protocol)...)
+	content = binary.BigEndian.AppendUint32(content, version)
+	msg := Message{
+		Type:    MsgTypeHello,
+		Len:     MsgLen(contentLen),
+		Content: content,
+	}
+	return msg.MarshalBinary()
+}
+
+// MsgLen calculates the total length a Message, including the type, length, body, and checksum.
+func MsgLen(bodyLen int) uint32 {
+	// Type (1) + Len (4) + Checksum (1)
+	headerTrailerLen := 5
+	return uint32(bodyLen + headerTrailerLen)
+}
+
+// calcChecksum calculates the uint8 value with summed of all bytes in the message equals 0.
+func calcChecksum(data []byte) byte {
+	var sum byte
+	for _, b := range data {
+		sum += b
+	}
+	// Bitwise NOT sum + 1
+	return ^sum + 1
+}
+
+// VerifyChecksum return a nil error if the sum of data's bytes equals 0, and ErrBadChecksum otherwise.
+func VerifyChecksum(data []byte) error {
+	var sum byte
+	for _, b := range data {
+		sum += b
+	}
+	if sum != 0 {
+		return ErrBadChecksum
+	}
+	return nil
 }
