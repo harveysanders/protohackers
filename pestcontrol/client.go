@@ -1,4 +1,4 @@
-package main
+package pestcontrol
 
 import (
 	"bufio"
@@ -9,35 +9,32 @@ import (
 )
 
 type Client struct {
-	// Authority server address
-	serverAddr string
-	conn       net.Conn
-	bufW       *bufio.Writer
-	bufR       *bufio.Reader
+	conn net.Conn
+	bufW *bufio.Writer
+	bufR *bufio.Reader
 }
 
-func NewClient(serverAddr string) *Client {
-	return &Client{serverAddr: serverAddr}
-}
-
-func (c *Client) Connect() error {
-	conn, err := net.Dial("tcp", c.serverAddr)
+func (c *Client) Connect(serverAddr string) error {
+	conn, err := net.Dial("tcp", serverAddr)
 	if err != nil {
 		return err
 	}
 
 	c.conn = conn
-	c.bufR = bufio.NewReader(conn)
 	c.bufW = bufio.NewWriter(conn)
+	c.bufR = bufio.NewReader(conn)
 	return nil
 }
 
 func (c *Client) Close() error {
-	return c.conn.Close()
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
 }
 
-// SendHello sends a Hello message to the Authority server.
-func (c *Client) SendHello() error {
+// sendHello sends a Hello message to the Authority server.
+func (c *Client) sendHello() error {
 	if c.conn == nil {
 		return fmt.Errorf("client not connected")
 	}
@@ -53,4 +50,13 @@ func (c *Client) SendHello() error {
 		return fmt.Errorf("c.bufW.Write: %w", err)
 	}
 	return nil
+}
+
+// readMessage reads a single message from the client underlying connection.
+func (c *Client) readMessage() (proto.Message, error) {
+	var msg proto.Message
+	if _, err := msg.ReadFrom(c.conn); err != nil {
+		return msg, err
+	}
+	return msg, nil
 }

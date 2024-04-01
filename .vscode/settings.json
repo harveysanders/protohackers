@@ -4,6 +4,7 @@
     "Bcoin",
     "inmem",
     "mobprox",
+    "pestcontrol",
     "reversebits",
     "stretchr"
   ]

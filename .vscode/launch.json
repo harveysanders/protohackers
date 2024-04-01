@@ -84,6 +84,16 @@
       "env": {
         "PORT": "9000"
       }
+    },
+    {
+      "name": "11 - Pestcontrol",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/pestcontrol/cmd",
+      "env": {
+        "PORT": "9000"
+      }
     }
   ]
 }

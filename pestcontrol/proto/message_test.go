@@ -1,6 +1,7 @@
 package proto_test
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/harveysanders/protohackers/pestcontrol/proto"
@@ -22,7 +23,7 @@ func TestMessageHello(t *testing.T) {
 	wantHello := proto.MsgHello{Protocol: "pestcontrol", Version: 1}
 
 	var gotMessage proto.Message
-	err := gotMessage.UnmarshalBinary(input)
+	_, err := gotMessage.ReadFrom(bytes.NewReader(input))
 	require.NoError(t, err)
 	require.Equal(t, gotMessage.Type, proto.MsgTypeHello)
 	require.Equal(t, gotMessage.Len, uint32(25))

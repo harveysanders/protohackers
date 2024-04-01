@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 )
 
 type MsgType byte
@@ -36,22 +37,38 @@ type Message struct {
 	Checksum byte    // Checksum of the message. The sum of checksum and all bytes in the message should be 0 (modulo 256).
 }
 
-func (m *Message) UnmarshalBinary(data []byte) error {
-	headerLen := 5 // 1 byte for type, 4 bytes for length
-	checksumLen := 1
-	if len(data) < headerLen+checksumLen {
-		return ErrShortMessage
-	}
+func (m *Message) ReadFrom(r io.Reader) (int64, error) {
+	var fullMsg bytes.Buffer
+	tr := io.TeeReader(r, &fullMsg)
+
 	// Type is the first byte
-	m.Type = MsgType(data[0])
-	// Total length is the next uin32 (4 bytes)
-	m.Len = binary.BigEndian.Uint32(data[1:5])
-	if len(data) != int(m.Len) {
-		return fmt.Errorf("expected content length: %d, got: %d", m.Len, len(data)-headerLen-checksumLen)
+	rawType := make([]byte, 1)
+	if _, err := io.ReadFull(tr, rawType); err != nil {
+		return int64(fullMsg.Len()), fmt.Errorf("read type byte: %w", err)
 	}
-	m.Content = data[headerLen : m.Len-uint32(checksumLen)]
-	m.Checksum = data[len(data)-1]
-	return nil
+	m.Type = MsgType(rawType[0])
+
+	// Total length is the next uin32 (4 bytes)
+	rawLen := make([]byte, 4)
+	if _, err := io.ReadFull(tr, rawLen); err != nil {
+		return int64(fullMsg.Len()), fmt.Errorf("read total length: %w", err)
+	}
+	m.Len = binary.BigEndian.Uint32(rawLen)
+
+	// Read the rest of the message (save for the 5 bytes we already read)
+	contentLen := m.Len - 5
+	content := make([]byte, contentLen)
+	if _, err := io.ReadFull(tr, content); err != nil {
+		return int64(fullMsg.Len()), fmt.Errorf("read content: %w", err)
+	}
+	m.Content = content[:contentLen-1]
+	m.Checksum = content[contentLen-1]
+	if err := VerifyChecksum(fullMsg.Bytes()); err != nil {
+		// TODO: Send error response
+		return int64(fullMsg.Len()), fmt.Errorf("verify checksum: %w", err)
+	}
+
+	return int64(fullMsg.Len()), nil
 }
 
 func (m *Message) MarshalBinary() ([]byte, error) {
