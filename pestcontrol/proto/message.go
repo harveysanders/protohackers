@@ -205,8 +205,8 @@ func (d MsgDialAuthority) MarshalBinary() ([]byte, error) {
 	return msg.MarshalBinary()
 }
 
-// Population represents a target population for a site.
-type Population struct {
+// PopulationTarget represents a desired population range for a site.
+type PopulationTarget struct {
 	Species string // Name of the species. Any difference in string is considered a different species.
 	// Ex: "long-tailed rat" and the "common long-tailed rat" are 2 different species.
 	Min uint32 // Minimum intended population for the species
@@ -216,7 +216,7 @@ type Population struct {
 // MsgTargetPopulations is sent by the Authority Server in response to a MsgDialAuthority message. It contains the target populations for the site requested by the client.
 type MsgTargetPopulations struct {
 	Site        uint32 // ID for the physical location.
-	Populations []Population
+	Populations []PopulationTarget
 }
 
 func (m Message) ToMsgTargetPopulations() (MsgTargetPopulations, error) {
@@ -225,10 +225,10 @@ func (m Message) ToMsgTargetPopulations() (MsgTargetPopulations, error) {
 	msg.Site = binary.BigEndian.Uint32(m.Content[:size32])
 
 	popLen := binary.BigEndian.Uint32(m.Content[size32 : size32*2])
-	msg.Populations = make([]Population, 0, popLen)
+	msg.Populations = make([]PopulationTarget, 0, popLen)
 	popRdr := bytes.NewReader(m.Content[size32*2:])
 	for i := 0; i < int(popLen); i++ {
-		var pop Population
+		var pop PopulationTarget
 		var species Str
 		if _, err := species.ReadFrom(popRdr); err != nil {
 			return msg, fmt.Errorf("species.ReadFrom: %w", err)
@@ -268,6 +268,45 @@ func (m MsgTargetPopulations) MarshalBinary() ([]byte, error) {
 		Content: content,
 	}
 	return msg.MarshalBinary()
+}
+
+// PopulationCount represents the current population of a species at a site.
+type PopulationCount struct {
+	Species string
+	Count   uint32
+}
+
+// MsgSiteVisit is sent by the client to this server to report the observed species population of a site.
+type MsgSiteVisit struct {
+	Site        uint32
+	Populations []PopulationCount
+}
+
+func (m Message) ToMsgSiteVisit() (MsgSiteVisit, error) {
+	var sv MsgSiteVisit
+	contentRdr := bytes.NewReader(m.Content)
+	if err := binary.Read(contentRdr, binary.BigEndian, &sv.Site); err != nil {
+		return sv, fmt.Errorf("read site: %w", err)
+	}
+	var popLen uint32
+	if err := binary.Read(contentRdr, binary.BigEndian, &popLen); err != nil {
+		return sv, fmt.Errorf("read populations length: %w", err)
+	}
+
+	sv.Populations = make([]PopulationCount, 0, popLen)
+	for i := 0; i < int(popLen); i++ {
+		var pop PopulationCount
+		var species Str
+		if _, err := species.ReadFrom(contentRdr); err != nil {
+			return sv, fmt.Errorf("read species: %w", err)
+		}
+		pop.Species = species.String()
+		if err := binary.Read(contentRdr, binary.BigEndian, &pop.Count); err != nil {
+			return sv, fmt.Errorf("read population count: %w", err)
+		}
+		sv.Populations = append(sv.Populations, pop)
+	}
+	return sv, nil
 }
 
 // MsgLen calculates the total length a Message, including the type, length, body, and checksum.
