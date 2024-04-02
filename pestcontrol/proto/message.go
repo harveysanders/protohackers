@@ -147,6 +147,7 @@ func (h MsgHello) MarshalBinary() ([]byte, error) {
 	return msg.MarshalBinary()
 }
 
+// MsgError is sent when client or server detects an error condition caused by the other side of the connection.
 type MsgError struct {
 	Message string
 }
@@ -162,7 +163,7 @@ func (m *Message) ToMsgError() (MsgError, error) {
 	return msgErr, nil
 }
 
-func (e *MsgError) MarshalBinary() ([]byte, error) {
+func (e MsgError) MarshalBinary() ([]byte, error) {
 	message := Str(e.Message)
 	content, err := message.MarshalBinary()
 	if err != nil {
@@ -170,6 +171,99 @@ func (e *MsgError) MarshalBinary() ([]byte, error) {
 	}
 	msg := Message{
 		Type:    MsgTypeError,
+		Len:     MsgLen(len(content)),
+		Content: content,
+	}
+	return msg.MarshalBinary()
+}
+
+// MsgOk is sent as an acknowledgment of success in response to valid DeletePolicy messages.
+type MsgOK struct{}
+
+func (o MsgOK) MarshalBinary() ([]byte, error) {
+	msg := Message{
+		Type:    MsgTypeOK,
+		Len:     MsgLen(0),
+		Content: []byte{},
+	}
+	return msg.MarshalBinary()
+}
+
+// MsgDialAuthority is sent by the client to the Authority Server to establish a connection with a specific authority (site). This message is sent after the Hello message is exchanged and the connection is established. The client should expect a MsgTargetPopulations in response.
+type MsgDialAuthority struct {
+	Site uint32
+}
+
+func (d MsgDialAuthority) MarshalBinary() ([]byte, error) {
+	content := make([]byte, 4)
+	binary.BigEndian.PutUint32(content, d.Site)
+	msg := Message{
+		Type:    MsgTypeDialAuthority,
+		Len:     MsgLen(len(content)),
+		Content: content,
+	}
+	return msg.MarshalBinary()
+}
+
+// Population represents a target population for a site.
+type Population struct {
+	Species string // Name of the species. Any difference in string is considered a different species.
+	// Ex: "long-tailed rat" and the "common long-tailed rat" are 2 different species.
+	Min uint32 // Minimum intended population for the species
+	Max uint32 // Maximum intended population for the species
+}
+
+// MsgTargetPopulations is sent by the Authority Server in response to a MsgDialAuthority message. It contains the target populations for the site requested by the client.
+type MsgTargetPopulations struct {
+	Site        uint32 // ID for the physical location.
+	Populations []Population
+}
+
+func (m Message) ToMsgTargetPopulations() (MsgTargetPopulations, error) {
+	var size32 = 4
+	var msg MsgTargetPopulations
+	msg.Site = binary.BigEndian.Uint32(m.Content[:size32])
+
+	popLen := binary.BigEndian.Uint32(m.Content[size32 : size32*2])
+	msg.Populations = make([]Population, 0, popLen)
+	popRdr := bytes.NewReader(m.Content[size32*2:])
+	for i := 0; i < int(popLen); i++ {
+		var pop Population
+		var species Str
+		if _, err := species.ReadFrom(popRdr); err != nil {
+			return msg, fmt.Errorf("species.ReadFrom: %w", err)
+		}
+		pop.Species = species.String()
+		if err := binary.Read(popRdr, binary.BigEndian, &pop.Min); err != nil {
+			return msg, fmt.Errorf("read min: %w", err)
+		}
+		if err := binary.Read(popRdr, binary.BigEndian, &pop.Max); err != nil {
+			return msg, fmt.Errorf("read max: %w", err)
+		}
+		msg.Populations = append(msg.Populations, pop)
+	}
+	return msg, nil
+}
+
+func (m MsgTargetPopulations) MarshalBinary() ([]byte, error) {
+	content := make([]byte, 0, 1024)
+	content = binary.BigEndian.AppendUint32(content, m.Site)
+	// Length of populations array
+	content = binary.BigEndian.AppendUint32(content, uint32(len(m.Populations)))
+
+	// Serialize each population
+	for _, pop := range m.Populations {
+		speciesBytes, err := Str(pop.Species).MarshalBinary()
+		if err != nil {
+			return nil, fmt.Errorf("species.MarshalBinary: %w", err)
+		}
+		content = append(content, speciesBytes...)
+		content = binary.BigEndian.AppendUint32(content, pop.Min)
+		content = binary.BigEndian.AppendUint32(content, pop.Max)
+	}
+
+	msg := Message{
+		Type:    MsgTypeTargetPopulations,
 		Len:     MsgLen(len(content)),
 		Content: content,
 	}

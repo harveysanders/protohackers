@@ -49,6 +49,8 @@ func TestClient_AuthServerSession(t *testing.T) {
 	}{
 		{dir: msgDirectionOutbound, msg: proto.MsgHello{}},
 		{dir: msgDirectionInbound, msg: proto.MsgHello{}},
+		{dir: msgDirectionOutbound, msg: proto.MsgDialAuthority{Site: 12345}},
+		{dir: msgDirectionInbound, msg: proto.MsgError{Message: "No such site: 12345"}},
 	}
 
 	config := ServerConfig{
@@ -57,6 +59,7 @@ func TestClient_AuthServerSession(t *testing.T) {
 	}
 	client := Client{}
 	client.Connect(config.AuthServerAddr)
+	defer client.Close()
 
 	for _, rr := range reqResp {
 		switch rr.dir {

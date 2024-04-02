@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestMessageHello(t *testing.T) {
+func TestMsgHello(t *testing.T) {
 	input := []byte{
 		0x50,                   // MsgTypeHello{
 		0x00, 0x00, 0x00, 0x19, // (length 25)
@@ -32,6 +32,68 @@ func TestMessageHello(t *testing.T) {
 	gotHello, err := gotMessage.ToMsgHello()
 	require.NoError(t, err)
 	require.Equal(t, wantHello, gotHello)
+}
+
+func TestMsgTargetPopulations(t *testing.T) {
+	// 	Hexadecimal:    Decoded:
+	// 54              TargetPopulations{
+	// 00 00 00 2c       (length 44)
+	// 00 00 30 39       site: 12345,
+	// 00 00 00 02       populations: (length 2) [
+	//                     {
+	// 00 00 00 03           species: (length 3)
+	// 64 6f 67                "dog",
+	// 00 00 00 01           min: 1,
+	// 00 00 00 03           max: 3,
+	//                     },
+	//                     {
+	// 00 00 00 03           species: (length 3)
+	// 72 61 74                "rat",
+	// 00 00 00 00           min: 0,
+	// 00 00 00 0a           max: 10,
+	//                     },
+	//                   ],
+	// 80                (checksum 0x80)
+	//                 }
+
+	input := []byte{
+		0x54,                   // TargetPopulations{
+		0x00, 0x00, 0x00, 0x2c, // (length 44)
+		0x00, 0x00, 0x30, 0x39, // site: 12345,
+		0x00, 0x00, 0x00, 0x02, // populations: (length 2) [
+		// _______{
+		0x00, 0x00, 0x00, 0x03, // species: (length 3)
+		0x64, 0x6f, 0x67, // "dog"
+		0x00, 0x00, 0x00, 0x01, // min: 1,
+		0x00, 0x00, 0x00, 0x03, // max: 3,
+		// _______},
+		// _______{
+		0x00, 0x00, 0x00, 0x03, // species: (length 3)
+		0x72, 0x61, 0x74, // "rat"
+		0x00, 0x00, 0x00, 0x00, // min: 0,
+		0x00, 0x00, 0x00, 0x0a, // max: 10,
+		// _______},
+		// _______],
+		0x80, // (checksum 0x80)
+	}
+
+	wantPopulations := proto.MsgTargetPopulations{
+		Site: 12345,
+		Populations: []proto.Population{
+			{Species: "dog", Min: 1, Max: 3},
+			{Species: "rat", Min: 0, Max: 10},
+		},
+	}
+
+	var gotMessage proto.Message
+	_, err := gotMessage.ReadFrom(bytes.NewReader(input))
+	require.NoError(t, err)
+	require.Equal(t, gotMessage.Type, proto.MsgTypeTargetPopulations)
+	require.Equal(t, gotMessage.Len, uint32(44))
+
+	gotPopulations, err := gotMessage.ToMsgTargetPopulations()
+	require.NoError(t, err)
+	require.Equal(t, wantPopulations, gotPopulations)
 }
 
 func TestMessage_MarshalBinary(t *testing.T) {
@@ -65,7 +127,7 @@ func TestMessage_MarshalBinary(t *testing.T) {
 			},
 		},
 		{
-			name:    "Empty MsgHello struct",
+			name:    "Empty MsgHello",
 			message: proto.MsgHello{},
 			want: []byte{
 				0x50,                   // MsgTypeHello{
@@ -76,6 +138,40 @@ func TestMessage_MarshalBinary(t *testing.T) {
 				0x72, 0x6f, 0x6c, //			 	rol"
 				0x00, 0x00, 0x00, 0x01, // version: 1
 				0xce, // (checksum 0xce)
+			},
+		},
+		{
+			name:    "MsgDialAuthority",
+			message: proto.MsgDialAuthority{Site: 12345},
+			want: []byte{
+				0x53,                   // DialAuthority{
+				0x00, 0x00, 0x00, 0x0a, // (length 10)
+				0x00, 0x00, 0x30, 0x39, // site: 12345,
+				0x3a, // (checksum 0x3a)
+			},
+		},
+		{
+			name:    "MsgTargetPopulations",
+			message: proto.MsgTargetPopulations{Site: 12345, Populations: []proto.Population{{Species: "dog", Min: 1, Max: 3}, {Species: "rat", Min: 0, Max: 10}}},
+			want: []byte{
+				0x54,                   // TargetPopulations{
+				0x00, 0x00, 0x00, 0x2c, // (length 44)
+				0x00, 0x00, 0x30, 0x39, // site: 12345,
+				0x00, 0x00, 0x00, 0x02, // populations: (length 2) [
+				// _______{
+				0x00, 0x00, 0x00, 0x03, // species: (length 3)
+				0x64, 0x6f, 0x67, // "dog"
+				0x00, 0x00, 0x00, 0x01, // min: 1,
+				0x00, 0x00, 0x00, 0x03, // max: 3,
+				// _______},
+				// _______{
+				0x00, 0x00, 0x00, 0x03, // species: (length 3)
+				0x72, 0x61, 0x74, // "rat"
+				0x00, 0x00, 0x00, 0x00, // min: 0,
+				0x00, 0x00, 0x00, 0x0a, // max: 10,
+				// _______},
+				// _______],
+				0x80, // (checksum 0x80)
 			},
 		},
 	}

@@ -2,6 +2,7 @@ package proto
 
 import (
 	"encoding/binary"
+	"io"
 )
 
 // Str is a string.
@@ -28,6 +29,25 @@ func (s *Str) UnmarshalBinary(data []byte) error {
 
 	*s = Str(data[u32Len : u32Len+int(strLen)])
 	return nil
+}
+
+func (s *Str) ReadFrom(r io.Reader) (int64, error) {
+	u32Len := 4
+	rawLen := make([]byte, u32Len)
+	// Using io.ReadFull() rather than binary.Read() to return the correct number of bytes read.
+	if n, err := io.ReadFull(r, rawLen); err != nil {
+		return int64(n), err
+	}
+	strLen := binary.BigEndian.Uint32(rawLen)
+	if strLen == 0 {
+		return int64(u32Len), nil
+	}
+	str := make([]byte, strLen)
+	if n, err := io.ReadFull(r, str); err != nil {
+		return int64(u32Len + n), err
+	}
+	*s = Str(str)
+	return int64(u32Len + int(strLen)), nil
 }
 
 func (s Str) MarshalBinary() ([]byte, error) {
