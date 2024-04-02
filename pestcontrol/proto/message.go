@@ -37,6 +37,8 @@ type Message struct {
 	Checksum byte    // Checksum of the message. The sum of checksum and all bytes in the message should be 0 (modulo 256).
 }
 
+// ReadFrom reads a message from the reader and populates the Message struct.
+// The messages's checksum is verified before returning.
 func (m *Message) ReadFrom(r io.Reader) (int64, error) {
 	var fullMsg bytes.Buffer
 	tr := io.TeeReader(r, &fullMsg)
@@ -65,13 +67,13 @@ func (m *Message) ReadFrom(r io.Reader) (int64, error) {
 	m.Checksum = content[contentLen-1]
 	if err := VerifyChecksum(fullMsg.Bytes()); err != nil {
 		// TODO: Send error response
-		return int64(fullMsg.Len()), fmt.Errorf("verify checksum: %w", err)
+		return int64(fullMsg.Len()), err
 	}
 
 	return int64(fullMsg.Len()), nil
 }
 
-func (m *Message) MarshalBinary() ([]byte, error) {
+func (m Message) MarshalBinary() ([]byte, error) {
 	data := make([]byte, 0, m.Len)
 	buf := bytes.NewBuffer(data)
 	// Write type
@@ -129,18 +131,46 @@ func (m *Message) ToMsgHello() (MsgHello, error) {
 	return hello, nil
 }
 
-func (h *MsgHello) MarshalBinary() ([]byte, error) {
-	protocol := "pestcontrol"
-	version := uint32(4)
-	//  "pestcontrol" (11) +  uint32 version (4)
-	contentLen := len(protocol) + 4
-	content := make([]byte, 0, contentLen)
-	content = binary.BigEndian.AppendUint32(content, uint32(contentLen))
-	content = append(content, []byte(protocol)...)
+func (h MsgHello) MarshalBinary() ([]byte, error) {
+	content, err := Str("pestcontrol").MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+
+	version := uint32(1)
 	content = binary.BigEndian.AppendUint32(content, version)
 	msg := Message{
 		Type:    MsgTypeHello,
-		Len:     MsgLen(contentLen),
+		Len:     MsgLen(len(content)),
+		Content: content,
+	}
+	return msg.MarshalBinary()
+}
+
+type MsgError struct {
+	Message string
+}
+
+// ToMsgError converts a message to a MsgError struct.
+func (m *Message) ToMsgError() (MsgError, error) {
+	contentLen := binary.BigEndian.Uint32(m.Content[:4])
+	var msgErr MsgError
+	if len(m.Content) < int(contentLen)+4 {
+		return msgErr, ErrShortMessage
+	}
+	msgErr.Message = string(m.Content[4 : 4+contentLen])
+	return msgErr, nil
+}
+
+func (e *MsgError) MarshalBinary() ([]byte, error) {
+	message := Str(e.Message)
+	content, err := message.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	msg := Message{
+		Type:    MsgTypeError,
+		Len:     MsgLen(len(content)),
 		Content: content,
 	}
 	return msg.MarshalBinary()
@@ -149,7 +179,7 @@ func (h *MsgHello) MarshalBinary() ([]byte, error) {
 // MsgLen calculates the total length a Message, including the type, length, body, and checksum.
 func MsgLen(bodyLen int) uint32 {
 	// Type (1) + Len (4) + Checksum (1)
-	headerTrailerLen := 5
+	headerTrailerLen := 1 + 4 + 1
 	return uint32(bodyLen + headerTrailerLen)
 }
 

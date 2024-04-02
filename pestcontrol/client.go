@@ -52,7 +52,24 @@ func (c *Client) sendHello() error {
 	return nil
 }
 
+func (c *Client) sendError(err error) error {
+	if c.conn == nil {
+		return fmt.Errorf("client not connected")
+	}
+	errMsg := proto.MsgError{Message: err.Error()}
+	msg, err := errMsg.MarshalBinary()
+	if err != nil {
+		return fmt.Errorf("hello.MarshalBinary: %w", err)
+	}
+	if _, err := c.bufW.Write(msg); err != nil {
+		return fmt.Errorf("c.bufW.Write: %w", err)
+	}
+	return nil
+
+}
+
 // readMessage reads a single message from the client underlying connection.
+// If the message checksum is invalid, a proto.ErrBadChecksum is returned.
 func (c *Client) readMessage() (proto.Message, error) {
 	var msg proto.Message
 	if _, err := msg.ReadFrom(c.conn); err != nil {

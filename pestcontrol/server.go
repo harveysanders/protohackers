@@ -93,7 +93,9 @@ func (s *Server) handleAuthServerResponses() error {
 	for {
 		msg, err := s.authSrv.client.readMessage()
 		if err != nil {
-			// TODO Send back error response?
+			if errors.Is(err, proto.ErrBadChecksum) {
+				_ = s.authSrv.client.sendError(err)
+			}
 			return err
 		}
 
@@ -104,11 +106,18 @@ func (s *Server) handleAuthServerResponses() error {
 			hello, err := msg.ToMsgHello()
 			if err != nil {
 				s.logger.Printf("hello message error: %v\n", err)
+				if err := s.authSrv.client.sendError(err); err != nil {
+					s.logger.Printf("send error to authority server: %v\n", err)
+				}
 				continue
 			}
 			s.logger.Println(hello)
 		case proto.MsgTypeError:
-			s.logger.Printf("MsgTypeError\n")
+			errMsg, err := msg.ToMsgError()
+			if err != nil {
+				s.logger.Printf("message error: %v\n", err)
+			}
+			s.logger.Printf("recv'd error message from authority server\n%q", errMsg.Message)
 		case proto.MsgTypeOK:
 			s.logger.Printf("MsgTypeOK\n")
 		case proto.MsgTypeDialAuthority:

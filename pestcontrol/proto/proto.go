@@ -30,6 +30,15 @@ func (s *Str) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
+func (s Str) MarshalBinary() ([]byte, error) {
+	length := len(s.String())
+	// uint32 size + len of string
+	data := make([]byte, 0, 4+length)
+	data = binary.BigEndian.AppendUint32(data, uint32(length))
+	data = append(data, []byte(s.String())...)
+	return data, nil
+}
+
 // U32 is a 32-bit unsigned integer.
 type U32 uint32
 
