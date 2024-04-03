@@ -2,6 +2,7 @@ package pestcontrol
 
 import (
 	"bytes"
+	"context"
 	"encoding"
 	"testing"
 
@@ -11,7 +12,7 @@ import (
 
 func TestClient(t *testing.T) {
 	client := Client{}
-	err := client.Connect("pestcontrol.protohackers.com:20547")
+	err := client.Connect(context.TODO(), "pestcontrol.protohackers.com:20547")
 	require.NoError(t, err)
 
 	defer func() {
@@ -58,7 +59,7 @@ func TestClient_AuthServerSession(t *testing.T) {
 		AuthServerAddr: "pestcontrol.protohackers.com:20547",
 	}
 	client := Client{}
-	client.Connect(config.AuthServerAddr)
+	client.Connect(context.TODO(), config.AuthServerAddr)
 	defer client.Close()
 
 	for _, rr := range reqResp {

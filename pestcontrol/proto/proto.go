@@ -72,10 +72,3 @@ func (u *U32) UnmarshalBinary(data []byte) error {
 	*u = U32(binary.BigEndian.Uint32(data))
 	return nil
 }
-
-type Element map[string]any
-type Array []Element
-
-func (a *Array) UnmarshalBinary(data []byte) error {
-	return nil
-}
