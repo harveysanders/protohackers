@@ -3,6 +3,7 @@ package pestcontrol
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"sync"
@@ -14,6 +15,10 @@ import (
 type contextKey string
 
 const ctxKeyConnectionID = contextKey("github.com/harveysanders/protohackers/pestcontrol:connection_ID")
+
+var (
+	errServerError = errors.New("server error")
+)
 
 type ServerConfig struct {
 	AuthServerAddr string
@@ -35,17 +40,20 @@ type Server struct {
 	siteStore inmem.Store
 }
 
-func NewServer(logger *log.Logger, config ServerConfig) *Server {
+func NewServer(logger *log.Logger, config ServerConfig, siteStore inmem.Store) *Server {
 	authSrv := &AuthorityServer{
 		addr: config.AuthServerAddr,
+		// TODO: Figure out a good initial capacity for the sites map.
+		sites: make(map[uint32]Client, 200),
 	}
 
 	if logger == nil {
 		logger = log.Default()
 	}
 	return &Server{
-		authSrv: authSrv,
-		logger:  logger,
+		authSrv:   authSrv,
+		logger:    logger,
+		siteStore: siteStore,
 	}
 }
 
@@ -85,6 +93,8 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) handleClient(ctx context.Context, conn net.Conn) {
+	defer conn.Close()
+
 	connID, ok := ctx.Value(ctxKeyConnectionID).(int32)
 	if !ok {
 		s.logger.Println("invalid connection ID in context")
@@ -92,33 +102,88 @@ func (s *Server) handleClient(ctx context.Context, conn net.Conn) {
 	}
 
 	s.logger.Printf("client [%d] connected!\n", connID)
-	var msg proto.Message
-	if _, err := msg.ReadFrom(conn); err != nil {
-		s.logger.Printf("[%d] read message from client: %v\n", connID, err)
-	}
 
-	switch msg.Type {
-	case proto.MsgTypeHello:
-		s.logger.Printf("[%d]: MsgTypeHello\n", connID)
-	case proto.MsgTypeError:
-		s.logger.Printf("[%d]: MsgTypeError\n", connID)
-	case proto.MsgTypeOK:
-		s.logger.Printf("[%d]: MsgTypeOK\n", connID)
-	case proto.MsgTypeSiteVisit:
-		s.logger.Printf("MsgTypeSiteVisit\n")
-		sv, err := msg.ToMsgSiteVisit()
-		if err != nil {
-			s.logger.Printf("msg.ToMsgSiteVisit: %v\n", err)
+	for {
+		var msg proto.Message
+		if _, err := msg.ReadFrom(conn); err != nil {
+			s.logger.Printf("[%d] read message from client: %v\n", connID, err)
+			return
 		}
-		s.handleSiteVisit(ctx, sv)
-	default:
-		s.logger.Printf("[%d]: unknown message type %x\n", connID, msg.Type)
+
+		switch msg.Type {
+		case proto.MsgTypeHello:
+			s.logger.Printf("[%d]: MsgTypeHello\n", connID)
+			_, err := msg.ToMsgHello()
+			if err != nil {
+				s.logger.Printf("msg.ToMsgHello: %v\n", err)
+				s.sendErrorResp(conn, errors.New("invalid hello message"))
+				return
+			}
+			if err := s.handleHello(ctx, conn); err != nil {
+				s.logger.Printf("handleHello: %v\n", err)
+				s.sendErrorResp(conn, errServerError)
+				return
+			}
+		case proto.MsgTypeError:
+			s.logger.Printf("[%d]: MsgTypeError\n", connID)
+		case proto.MsgTypeOK:
+			s.logger.Printf("[%d]: MsgTypeOK\n", connID)
+		case proto.MsgTypeSiteVisit:
+			s.logger.Printf("MsgTypeSiteVisit\n")
+			sv, err := msg.ToMsgSiteVisit()
+			if err != nil {
+				s.logger.Printf("msg.ToMsgSiteVisit: %v\n", err)
+				s.sendErrorResp(conn, errors.New("invalid site visit message"))
+				return
+			}
+			if err := s.handleSiteVisit(ctx, sv); err != nil {
+				s.logger.Printf("handleSiteVisit: %v\n", err)
+				s.sendErrorResp(conn, errServerError)
+				return
+			}
+		default:
+			if msg.Type == 0 {
+				return
+			}
+			s.logger.Printf("[%d]: unknown message type %x\n", connID, msg.Type)
+			s.sendErrorResp(conn, errors.New("unknown message type"))
+			return
+		}
 	}
 }
 
-func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteVisit) {
-	if ctx.Done() != nil {
+func (s *Server) sendErrorResp(conn net.Conn, err error) {
+	resp := proto.MsgError{Message: err.Error()}
+	data, err := resp.MarshalBinary()
+	if err != nil {
+		s.logger.Printf("error.MarshalBinary: %v\n", err)
 		return
+	}
+	if _, err := conn.Write(data); err != nil {
+		s.logger.Printf("error resp write: %v\n", err)
+		return
+	}
+}
+
+func (s *Server) handleHello(ctx context.Context, conn net.Conn) error {
+	if ctx.Done() != nil {
+		return nil
+	}
+	resp := proto.MsgHello{}
+	data, err := resp.MarshalBinary()
+	if err != nil {
+		return fmt.Errorf("hello.MarshalBinary: %w", err)
+
+	}
+	if _, err := conn.Write(data); err != nil {
+		return fmt.Errorf("write hello resp: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteVisit) error {
+	if ctx.Done() != nil {
+		return nil
 	}
 	// Check if the server already has a connection to the specified site.
 	s.authSrv.mu.RLock()
@@ -130,12 +195,22 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 		siteClient = Client{}
 		popResp, err := siteClient.establishSiteConnection(ctx, s.authSrv.addr, observation.Site)
 		if err != nil {
-			s.logger.Printf("establishSiteConnection: %v\n", err)
-			return
+			return fmt.Errorf("establishSiteConnection: %w", err)
 		}
 
 		s.logger.Printf("received target populations: %+v\n", popResp)
-		// TODO: Persist the target populations for the site.
+		pops := make([]inmem.TargetPopulation, 0, len(popResp.Populations))
+
+		for _, v := range popResp.Populations {
+			pops = append(pops, inmem.TargetPopulation{
+				Species: v.Species,
+				Min:     v.Min,
+				Max:     v.Max,
+			})
+		}
+		if err := s.siteStore.SetTargetPopulations(observation.Site, pops); err != nil {
+			return fmt.Errorf("SetTargetPopulations: %w", err)
+		}
 
 		s.authSrv.mu.Lock()
 		s.authSrv.sites[observation.Site] = siteClient
@@ -145,9 +220,9 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 	// Get the persisted target populations for the site+species.
 	site, err := s.siteStore.GetSite(observation.Site)
 	if err != nil {
-		s.logger.Printf("GetSite: %v\n", err)
-		return
+		return fmt.Errorf("GetSite: %w", err)
 	}
+
 	for _, observed := range observation.Populations {
 		target, ok := site.TargetPopulations[observed.Species]
 		if !ok {
@@ -159,24 +234,25 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 		if observed.Count < target.Min {
 			s.logger.Printf("species %q population is below target range\n", observed.Species)
 			if err := s.siteStore.SetPolicy(observation.Site, observed.Species, inmem.Conserve); err != nil {
-				s.logger.Printf("SetPolicy: %v\n", err)
-				continue
+				return fmt.Errorf("SetPolicy: %w", err)
 			}
 		}
+		// TODO: Send policy to the Authority Server (siteClient).
 		if observed.Count > target.Max {
 			s.logger.Printf("species %q population is above target range\n", observed.Species)
 			if err := s.siteStore.SetPolicy(observation.Site, observed.Species, inmem.Cull); err != nil {
-				s.logger.Printf("SetPolicy: %v\n", err)
-				continue
+				return fmt.Errorf("SetPolicy: %w", err)
 			}
 		}
-		s.logger.Printf("CreatePolicy: %v\n", err)
+		// TODO: Send policy to the Authority Server (siteClient).
+
 		if target.Min <= observed.Count && observed.Count <= target.Max {
 			s.logger.Printf("species %q population is within target range\n", observed.Species)
 			if err := s.siteStore.DeletePolicy(observation.Site, observed.Species); err != nil {
-				s.logger.Printf("DeletePolicy: %v\n", err)
-				continue
+				return fmt.Errorf("DeletePolicy: %w", err)
 			}
 		}
+		// TODO: Send policy to the Authority Server (siteClient).
 	}
+	return nil
 }

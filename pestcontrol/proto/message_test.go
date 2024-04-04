@@ -87,6 +87,34 @@ func TestMessage_MarshalBinary(t *testing.T) {
 				0x80, // (checksum 0x80)
 			},
 		},
+		{
+			name: "MsgSiteVisit",
+			message: proto.MsgSiteVisit{
+				Site: 12345,
+				Populations: []proto.PopulationCount{
+					{Species: "dog", Count: 1},
+					{Species: "rat", Count: 5},
+				}},
+			want: []byte{
+				0x58,                   // SiteVisit{
+				0x00, 0x00, 0x00, 0x24, // (length 36)
+				0x00, 0x00, 0x30, 0x39, // site: 12345,
+				0x00, 0x00, 0x00, 0x02, // populations: (length 2) [
+				// _______{
+				0x00, 0x00, 0x00, 0x03, // species: (length 3)
+				0x64, 0x6f, 0x67, // "dog"
+				0x00, 0x00, 0x00, 0x01, // count: 1,
+				// _______},
+				// _______{
+				0x00, 0x00, 0x00, 0x03, // species: (length 3)
+				0x72, 0x61, 0x74, // "rat"
+				0x00, 0x00, 0x00, 0x05, // count: 5,
+				// _______},
+				// _______],
+				0x8c, // (checksum 0x8c)
+
+			},
+		},
 	}
 
 	for _, tc := range testCases {

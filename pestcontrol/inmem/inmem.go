@@ -44,14 +44,26 @@ type Store struct {
 }
 
 // NewStore returns a new in-memory store.
-func NewStore() *Store {
-	return &Store{
+func NewStore() Store {
+	return Store{
 		sites: make(map[uint32]Site, 200),
 	}
 }
 
-func (s *Store) AddSite(site Site) {
+func (s *Store) SetTargetPopulations(siteID uint32, pops []TargetPopulation) error {
+	site := Site{ID: siteID}
+	site.TargetPopulations = make(map[string]TargetPopulation, len(pops))
+	site.Policies = make(map[string]*Policy, len(pops))
+
+	for _, pop := range pops {
+		site.TargetPopulations[pop.Species] = pop
+	}
+	return s.AddSite(site)
+}
+
+func (s *Store) AddSite(site Site) error {
 	s.sites[site.ID] = site
+	return nil
 }
 
 func (s *Store) GetSite(siteID uint32) (Site, error) {

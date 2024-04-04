@@ -282,6 +282,28 @@ type MsgSiteVisit struct {
 	Populations []PopulationCount
 }
 
+func (sv MsgSiteVisit) MarshalBinary() ([]byte, error) {
+	content := make([]byte, 0, 1024)
+	content = binary.BigEndian.AppendUint32(content, sv.Site)
+	content = binary.BigEndian.AppendUint32(content, uint32(len(sv.Populations)))
+
+	for _, pop := range sv.Populations {
+		speciesBytes, err := Str(pop.Species).MarshalBinary()
+		if err != nil {
+			return nil, fmt.Errorf("species.MarshalBinary: %w", err)
+		}
+		content = append(content, speciesBytes...)
+		content = binary.BigEndian.AppendUint32(content, pop.Count)
+	}
+
+	msg := Message{
+		Type:    MsgTypeSiteVisit,
+		Len:     MsgLen(len(content)),
+		Content: content,
+	}
+	return msg.MarshalBinary()
+}
+
 func (m Message) ToMsgSiteVisit() (MsgSiteVisit, error) {
 	var sv MsgSiteVisit
 	contentRdr := bytes.NewReader(m.Content)

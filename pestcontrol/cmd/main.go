@@ -8,6 +8,7 @@ import (
 	"os/signal"
 
 	"github.com/harveysanders/protohackers/pestcontrol"
+	"github.com/harveysanders/protohackers/pestcontrol/inmem"
 )
 
 func main() {
@@ -29,7 +30,9 @@ func run(ctx context.Context) error {
 		port = PORT
 	}
 
-	srv := pestcontrol.NewServer(log.Default(), config)
+	store := inmem.NewStore()
+
+	srv := pestcontrol.NewServer(log.Default(), config, store)
 	srvErr := make(chan error)
 
 	go func() {
