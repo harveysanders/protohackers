@@ -30,9 +30,20 @@ func run(ctx context.Context) error {
 		port = PORT
 	}
 
-	store := inmem.NewStore()
+	logFilePath := os.Getenv("LOG_FILE")
+	logger := log.Default()
+	if logFilePath != "" {
+		logFile, err := os.Create(logFilePath)
+		if err != nil {
+			return err
+		}
+		defer logFile.Close()
 
-	srv := pestcontrol.NewServer(log.Default(), config, store)
+		logger = log.New(logFile, "", log.LstdFlags|log.Lshortfile)
+	}
+
+	store := inmem.NewStore()
+	srv := pestcontrol.NewServer(logger, config, store)
 	srvErr := make(chan error)
 
 	go func() {

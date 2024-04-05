@@ -129,7 +129,7 @@ func (s *Server) handleClient(ctx context.Context, conn net.Conn) {
 		case proto.MsgTypeOK:
 			s.logger.Printf("[%d]: MsgTypeOK\n", connID)
 		case proto.MsgTypeSiteVisit:
-			s.logger.Printf("MsgTypeSiteVisit\n")
+			s.logger.Printf("[%d]: MsgTypeSiteVisit\n", connID)
 			sv, err := msg.ToMsgSiteVisit()
 			if err != nil {
 				s.logger.Printf("msg.ToMsgSiteVisit: %v\n", err)
@@ -198,7 +198,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 			return fmt.Errorf("establishSiteConnection: %w", err)
 		}
 
-		s.logger.Printf("received target populations: %+v\n", popResp)
+		s.logger.Printf("received %d target populations from site %d\n", len(popResp.Populations), popResp.Site)
 		pops := make([]inmem.TargetPopulation, 0, len(popResp.Populations))
 
 		for _, v := range popResp.Populations {
@@ -226,33 +226,38 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 	for _, observed := range observation.Populations {
 		target, ok := site.TargetPopulations[observed.Species]
 		if !ok {
-			s.logger.Printf("species %q not found in target populations\n", observed.Species)
+			s.logger.Printf("(site: %d)\nspecies %q not found in target populations\n", observation.Site, observed.Species)
 			continue
 		}
 
 		// Check if the observed population is within the target range.
 		if observed.Count < target.Min {
-			s.logger.Printf("species %q population is below target range\n", observed.Species)
+			s.logger.Printf("(site: %d)\nspecies %q population is below target range\n", observation.Site, observed.Species)
 			if err := s.siteStore.SetPolicy(observation.Site, observed.Species, inmem.Conserve); err != nil {
 				return fmt.Errorf("SetPolicy: %w", err)
 			}
+			return siteClient.createPolicy(observed.Species, proto.Conserve)
 		}
-		// TODO: Send policy to the Authority Server (siteClient).
+
 		if observed.Count > target.Max {
-			s.logger.Printf("species %q population is above target range\n", observed.Species)
+			s.logger.Printf("(site: %d)\nspecies %q population is above target range\n", observation.Site, observed.Species)
 			if err := s.siteStore.SetPolicy(observation.Site, observed.Species, inmem.Cull); err != nil {
 				return fmt.Errorf("SetPolicy: %w", err)
 			}
+			return siteClient.createPolicy(observed.Species, proto.Cull)
 		}
-		// TODO: Send policy to the Authority Server (siteClient).
 
 		if target.Min <= observed.Count && observed.Count <= target.Max {
-			s.logger.Printf("species %q population is within target range\n", observed.Species)
-			if err := s.siteStore.DeletePolicy(observation.Site, observed.Species); err != nil {
+			s.logger.Printf("(site: %d)\nspecies %q population is within target range\n", observation.Site, observed.Species)
+			p, err := s.siteStore.DeletePolicy(observation.Site, observed.Species)
+			if err != nil {
+				if errors.Is(err, inmem.ErrPolicyNotFound) {
+					continue
+				}
 				return fmt.Errorf("DeletePolicy: %w", err)
 			}
+			return siteClient.deletePolicy(p.ID)
 		}
-		// TODO: Send policy to the Authority Server (siteClient).
 	}
 	return nil
 }

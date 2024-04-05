@@ -331,6 +331,53 @@ func (m Message) ToMsgSiteVisit() (MsgSiteVisit, error) {
 	return sv, nil
 }
 
+type PolicyAction byte
+
+const (
+	Cull     PolicyAction = 0x90
+	Conserve PolicyAction = 0xa0
+)
+
+// MsgCreatePolicy is sent by the client to the Authority Server to create a population management policy for a species at a site.
+type MsgCreatePolicy struct {
+	Species string
+	Action  PolicyAction
+}
+
+func (cp MsgCreatePolicy) MarshalBinary() ([]byte, error) {
+	speciesBytes, err := Str(cp.Species).MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("species.MarshalBinary: %w", err)
+	}
+
+	content := make([]byte, 0, len(speciesBytes)+1)
+	content = append(content, speciesBytes...)
+	content = append(content, byte(cp.Action))
+
+	msg := Message{
+		Type:    MsgTypeCreatePolicy,
+		Len:     MsgLen(len(content)),
+		Content: content,
+	}
+	return msg.MarshalBinary()
+}
+
+// MsgDeletePolicy is sent by the client to the Authority Server to delete an existing population management policy for a species at a site.
+type MsgDeletePolicy struct {
+	Policy uint32
+}
+
+func (dp MsgDeletePolicy) MarshalBinary() ([]byte, error) {
+	content := make([]byte, 4)
+	binary.BigEndian.PutUint32(content, dp.Policy)
+	msg := Message{
+		Type:    MsgTypeDeletePolicy,
+		Len:     MsgLen(len(content)),
+		Content: content,
+	}
+	return msg.MarshalBinary()
+}
+
 // MsgLen calculates the total length a Message, including the type, length, body, and checksum.
 func MsgLen(bodyLen int) uint32 {
 	// Type (1) + Len (4) + Checksum (1)

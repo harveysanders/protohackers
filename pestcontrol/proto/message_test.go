@@ -115,6 +115,30 @@ func TestMessage_MarshalBinary(t *testing.T) {
 
 			},
 		},
+		{
+			name: "CreatePolicy",
+			message: proto.MsgCreatePolicy{
+				Species: "dog",
+				Action:  proto.Conserve},
+			want: []byte{
+				0x55,                   // CreatePolicy{
+				0x00, 0x00, 0x00, 0x0e, // (length 14)
+				0x00, 0x00, 0x00, 0x03, // species: (length 3)
+				0x64, 0x6f, 0x67, // "dog"
+				0xa0, // action: conserve,
+				0xc0, // (checksum 0xc0)
+			},
+		},
+		{
+			name:    "MsgDeletePolicy",
+			message: proto.MsgDeletePolicy{Policy: 123},
+			want: []byte{
+				0x56,                   // DeletePolicy{
+				0x00, 0x00, 0x00, 0x0a, // (length 10)
+				0x00, 0x00, 0x00, 0x7b, // policy: 123,
+				0x25, // (checksum 0x25)
+			},
+		},
 	}
 
 	for _, tc := range testCases {

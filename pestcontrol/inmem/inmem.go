@@ -14,7 +14,7 @@ type Site struct {
 	ID uint32
 	// TargetPopulations is a map of target population species names to TargetPopulation structs.
 	TargetPopulations map[string]TargetPopulation
-	Policies          map[string]*Policy
+	Policies          map[string]Policy
 }
 
 type TargetPopulation struct {
@@ -53,7 +53,7 @@ func NewStore() Store {
 func (s *Store) SetTargetPopulations(siteID uint32, pops []TargetPopulation) error {
 	site := Site{ID: siteID}
 	site.TargetPopulations = make(map[string]TargetPopulation, len(pops))
-	site.Policies = make(map[string]*Policy, len(pops))
+	site.Policies = make(map[string]Policy, len(pops))
 
 	for _, pop := range pops {
 		site.TargetPopulations[pop.Species] = pop
@@ -79,7 +79,7 @@ func (s *Store) SetPolicy(siteID uint32, species string, action PolicyAction) er
 	if !ok {
 		return ErrSiteNotFound
 	}
-	policy := &Policy{
+	policy := Policy{
 		Species:   species,
 		Action:    action,
 		CreatedAt: time.Now(),
@@ -89,28 +89,28 @@ func (s *Store) SetPolicy(siteID uint32, species string, action PolicyAction) er
 	return nil
 }
 
-func (s *Store) GetPolicy(siteID uint32, species string) (*Policy, error) {
+func (s *Store) GetPolicy(siteID uint32, species string) (Policy, error) {
 	site, ok := s.sites[siteID]
 	if !ok {
-		return nil, ErrSiteNotFound
+		return Policy{}, ErrSiteNotFound
 	}
 	policy, ok := site.Policies[species]
 	if !ok {
-		return nil, ErrPolicyNotFound
+		return Policy{}, ErrPolicyNotFound
 	}
 	return policy, nil
 }
 
-func (s *Store) DeletePolicy(siteID uint32, species string) error {
+func (s *Store) DeletePolicy(siteID uint32, species string) (Policy, error) {
 	site, ok := s.sites[siteID]
 	if !ok {
-		return ErrSiteNotFound
+		return Policy{}, ErrSiteNotFound
 	}
 
 	p, ok := site.Policies[species]
 	if !ok {
-		return ErrPolicyNotFound
+		return Policy{}, ErrPolicyNotFound
 	}
 	p.DeletedAt = time.Now()
-	return nil
+	return p, nil
 }

@@ -89,8 +89,43 @@ func (c *Client) sendError(err error) error {
 	if _, err := c.bufW.Write(msg); err != nil {
 		return fmt.Errorf("c.bufW.Write: %w", err)
 	}
+	if err := c.bufW.Flush(); err != nil {
+		return fmt.Errorf("c.bufW.Flush: %w", err)
+	}
 	return nil
+}
 
+func (c *Client) createPolicy(species string, action proto.PolicyAction) error {
+	msg := proto.MsgCreatePolicy{
+		Species: species,
+		Action:  action,
+	}
+	payload, err := msg.MarshalBinary()
+	if err != nil {
+		return fmt.Errorf("msg.MarshalBinary: %v", err)
+	}
+	if _, err := c.bufW.Write(payload); err != nil {
+		return fmt.Errorf("c.bufW.Write: %w", err)
+	}
+	if err := c.bufW.Flush(); err != nil {
+		return fmt.Errorf("c.bufW.Flush: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) deletePolicy(policyID uint32) error {
+	msg := proto.MsgDeletePolicy{Policy: policyID}
+	payload, err := msg.MarshalBinary()
+	if err != nil {
+		return fmt.Errorf("msg.MarshalBinary: %v", err)
+	}
+	if _, err := c.bufW.Write(payload); err != nil {
+		return fmt.Errorf("c.bufW.Write: %w", err)
+	}
+	if err := c.bufW.Flush(); err != nil {
+		return fmt.Errorf("c.bufW.Flush: %w", err)
+	}
+	return nil
 }
 
 // readMessage reads a single message from the client underlying connection.
