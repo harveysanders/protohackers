@@ -8,7 +8,7 @@ import (
 	"os/signal"
 
 	"github.com/harveysanders/protohackers/pestcontrol"
-	"github.com/harveysanders/protohackers/pestcontrol/inmem"
+	"github.com/harveysanders/protohackers/pestcontrol/sqlite"
 )
 
 func main() {
@@ -42,8 +42,19 @@ func run(ctx context.Context) error {
 		logger = log.New(logFile, "", log.LstdFlags|log.Lshortfile)
 	}
 
-	store := inmem.NewStore()
-	srv := pestcontrol.NewServer(logger, config, store)
+	dsn := "memory:"
+	if DSN := os.Getenv("DSN"); DSN != "" {
+		dsn = DSN
+	}
+
+	db := sqlite.NewDB(dsn)
+	if err := db.Open(); err != nil {
+		return fmt.Errorf("db.Open: %w", err)
+	}
+
+	siteService := sqlite.NewSiteService(db.DB)
+
+	srv := pestcontrol.NewServer(logger, config, siteService)
 	srvErr := make(chan error)
 
 	go func() {
@@ -55,6 +66,7 @@ func run(ctx context.Context) error {
 		}
 	}()
 	defer srv.Close()
+	defer db.Close()
 
 	select {
 	case <-ctx.Done():

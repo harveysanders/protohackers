@@ -7,5 +7,9 @@
     "pestcontrol",
     "reversebits",
     "stretchr"
-  ]
+  ],
+  "files.associations": {
+    "*.sql": "sqlite",
+  },
+  "SQL-Formatter-VSCode.dialect": "sqlite",
 }

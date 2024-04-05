@@ -1,6 +1,7 @@
 package inmem
 
 import (
+	"context"
 	"time"
 
 	pc "github.com/harveysanders/protohackers/pestcontrol"
@@ -18,7 +19,7 @@ func NewStore() Store {
 	}
 }
 
-func (s Store) SetTargetPopulations(siteID uint32, pops []pc.TargetPopulation) error {
+func (s Store) SetTargetPopulations(ctx context.Context, siteID uint32, pops []pc.TargetPopulation) error {
 	site := pc.Site{ID: siteID}
 	site.TargetPopulations = make(map[string]pc.TargetPopulation, len(pops))
 	site.Policies = make(map[string]pc.Policy, len(pops))
@@ -26,15 +27,15 @@ func (s Store) SetTargetPopulations(siteID uint32, pops []pc.TargetPopulation) e
 	for _, pop := range pops {
 		site.TargetPopulations[pop.Species] = pop
 	}
-	return s.AddSite(site)
+	return s.AddSite(ctx, site)
 }
 
-func (s Store) AddSite(site pc.Site) error {
+func (s Store) AddSite(ctx context.Context, site pc.Site) error {
 	s.sites[site.ID] = site
 	return nil
 }
 
-func (s Store) GetSite(siteID uint32) (pc.Site, error) {
+func (s Store) GetSite(ctx context.Context, siteID uint32) (pc.Site, error) {
 	site, ok := s.sites[siteID]
 	if !ok {
 		return pc.Site{}, pc.ErrPolicyNotFound
@@ -42,7 +43,7 @@ func (s Store) GetSite(siteID uint32) (pc.Site, error) {
 	return site, nil
 }
 
-func (s Store) SetPolicy(siteID uint32, species string, action pc.PolicyAction) error {
+func (s Store) SetPolicy(ctx context.Context, siteID uint32, species string, action pc.PolicyAction) error {
 	site, ok := s.sites[siteID]
 	if !ok {
 		return pc.ErrSiteNotFound
@@ -57,7 +58,7 @@ func (s Store) SetPolicy(siteID uint32, species string, action pc.PolicyAction) 
 	return nil
 }
 
-func (s Store) GetPolicy(siteID uint32, species string) (pc.Policy, error) {
+func (s Store) GetPolicy(ctx context.Context, siteID uint32, species string) (pc.Policy, error) {
 	site, ok := s.sites[siteID]
 	if !ok {
 		return pc.Policy{}, pc.ErrSiteNotFound
@@ -69,7 +70,7 @@ func (s Store) GetPolicy(siteID uint32, species string) (pc.Policy, error) {
 	return policy, nil
 }
 
-func (s Store) DeletePolicy(siteID uint32, species string) (pc.Policy, error) {
+func (s Store) DeletePolicy(ctx context.Context, siteID uint32, species string) (pc.Policy, error) {
 	site, ok := s.sites[siteID]
 	if !ok {
 		return pc.Policy{}, pc.ErrSiteNotFound

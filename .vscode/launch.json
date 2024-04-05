@@ -91,9 +91,7 @@
       "request": "launch",
       "mode": "auto",
       "program": "${workspaceFolder}/pestcontrol/cmd",
-      "env": {
-        "PORT": "9000"
-      }
+      "envFile": "${workspaceFolder}/pestcontrol/.env"
     }
   ]
 }

@@ -1,3 +1,5 @@
 .env
 localtonet
 *.pcap
+*.sqlite*
+logs

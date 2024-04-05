@@ -2,6 +2,7 @@ package pestcontrol_test
 
 import (
 	"bytes"
+	"context"
 	"net"
 	"testing"
 	"time"
@@ -66,7 +67,7 @@ func TestServer(t *testing.T) {
 
 	time.Sleep(740 * time.Millisecond)
 
-	policy, err := testStore.GetPolicy(900085189, "Aedes aegypti")
+	policy, err := testStore.GetPolicy(context.TODO(), 900085189, "Aedes aegypti")
 	require.NoError(t, err)
 	require.Equal(t, pestcontrol.Cull, policy.Action)
 }

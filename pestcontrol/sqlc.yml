@@ -1,0 +1,12 @@
+version: "2"
+sql:
+  - schema: "sqlite/migrations"
+    queries: "sqlite/queries"
+    engine: "sqlite"
+    gen:
+      go:
+        package: "sqlc"
+        out: "sqlite/sqlc"
+        overrides:
+          - db_type: "integer"
+            go_type: "uint32"
