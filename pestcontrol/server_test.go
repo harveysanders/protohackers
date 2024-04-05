@@ -68,5 +68,5 @@ func TestServer(t *testing.T) {
 
 	policy, err := testStore.GetPolicy(900085189, "Aedes aegypti")
 	require.NoError(t, err)
-	require.Equal(t, inmem.Cull, policy.Action)
+	require.Equal(t, pestcontrol.Cull, policy.Action)
 }

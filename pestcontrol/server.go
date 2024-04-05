@@ -8,7 +8,6 @@ import (
 	"net"
 	"sync"
 
-	"github.com/harveysanders/protohackers/pestcontrol/inmem"
 	"github.com/harveysanders/protohackers/pestcontrol/proto"
 )
 
@@ -34,13 +33,21 @@ type AuthorityServer struct {
 	sites map[uint32]Client
 }
 
+type Store interface {
+	AddSite(site Site) error
+	GetSite(siteID uint32) (Site, error)
+	SetPolicy(siteID uint32, species string, action PolicyAction) error
+	GetPolicy(siteID uint32, species string) (Policy, error)
+	DeletePolicy(siteID uint32, species string) (Policy, error)
+	SetTargetPopulations(siteID uint32, pops []TargetPopulation) error
+}
 type Server struct {
 	authSrv   *AuthorityServer
 	logger    *log.Logger
-	siteStore inmem.Store
+	siteStore Store
 }
 
-func NewServer(logger *log.Logger, config ServerConfig, siteStore inmem.Store) *Server {
+func NewServer(logger *log.Logger, config ServerConfig, siteStore Store) *Server {
 	authSrv := &AuthorityServer{
 		addr: config.AuthServerAddr,
 		// TODO: Figure out a good initial capacity for the sites map.
@@ -199,10 +206,10 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 		}
 
 		s.logger.Printf("received %d target populations from site %d\n", len(popResp.Populations), popResp.Site)
-		pops := make([]inmem.TargetPopulation, 0, len(popResp.Populations))
+		pops := make([]TargetPopulation, 0, len(popResp.Populations))
 
 		for _, v := range popResp.Populations {
-			pops = append(pops, inmem.TargetPopulation{
+			pops = append(pops, TargetPopulation{
 				Species: v.Species,
 				Min:     v.Min,
 				Max:     v.Max,
@@ -233,7 +240,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 		// Check if the observed population is within the target range.
 		if observed.Count < target.Min {
 			s.logger.Printf("(site: %d)\nspecies %q population is below target range\n", observation.Site, observed.Species)
-			if err := s.siteStore.SetPolicy(observation.Site, observed.Species, inmem.Conserve); err != nil {
+			if err := s.siteStore.SetPolicy(observation.Site, observed.Species, Conserve); err != nil {
 				return fmt.Errorf("SetPolicy: %w", err)
 			}
 			return siteClient.createPolicy(observed.Species, proto.Conserve)
@@ -241,7 +248,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 
 		if observed.Count > target.Max {
 			s.logger.Printf("(site: %d)\nspecies %q population is above target range\n", observation.Site, observed.Species)
-			if err := s.siteStore.SetPolicy(observation.Site, observed.Species, inmem.Cull); err != nil {
+			if err := s.siteStore.SetPolicy(observation.Site, observed.Species, Cull); err != nil {
 				return fmt.Errorf("SetPolicy: %w", err)
 			}
 			return siteClient.createPolicy(observed.Species, proto.Cull)
@@ -251,7 +258,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 			s.logger.Printf("(site: %d)\nspecies %q population is within target range\n", observation.Site, observed.Species)
 			p, err := s.siteStore.DeletePolicy(observation.Site, observed.Species)
 			if err != nil {
-				if errors.Is(err, inmem.ErrPolicyNotFound) {
+				if errors.Is(err, ErrPolicyNotFound) {
 					continue
 				}
 				return fmt.Errorf("DeletePolicy: %w", err)

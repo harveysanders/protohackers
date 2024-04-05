@@ -1,59 +1,27 @@
 package inmem
 
 import (
-	"errors"
 	"time"
-)
 
-var (
-	ErrSiteNotFound   = errors.New("site not found")
-	ErrPolicyNotFound = errors.New("policy not found")
-)
-
-type Site struct {
-	ID uint32
-	// TargetPopulations is a map of target population species names to TargetPopulation structs.
-	TargetPopulations map[string]TargetPopulation
-	Policies          map[string]Policy
-}
-
-type TargetPopulation struct {
-	Species string
-	Min     uint32
-	Max     uint32
-}
-
-type Policy struct {
-	ID        uint32
-	Species   string
-	Action    PolicyAction
-	CreatedAt time.Time
-	DeletedAt time.Time
-}
-
-type PolicyAction byte
-
-const (
-	Cull     PolicyAction = 0x90
-	Conserve PolicyAction = 0xa0
+	pc "github.com/harveysanders/protohackers/pestcontrol"
 )
 
 type Store struct {
 	// sites is a map of siteID to sites.
-	sites map[uint32]Site
+	sites map[uint32]pc.Site
 }
 
 // NewStore returns a new in-memory store.
 func NewStore() Store {
 	return Store{
-		sites: make(map[uint32]Site, 200),
+		sites: make(map[uint32]pc.Site, 200),
 	}
 }
 
-func (s *Store) SetTargetPopulations(siteID uint32, pops []TargetPopulation) error {
-	site := Site{ID: siteID}
-	site.TargetPopulations = make(map[string]TargetPopulation, len(pops))
-	site.Policies = make(map[string]Policy, len(pops))
+func (s Store) SetTargetPopulations(siteID uint32, pops []pc.TargetPopulation) error {
+	site := pc.Site{ID: siteID}
+	site.TargetPopulations = make(map[string]pc.TargetPopulation, len(pops))
+	site.Policies = make(map[string]pc.Policy, len(pops))
 
 	for _, pop := range pops {
 		site.TargetPopulations[pop.Species] = pop
@@ -61,25 +29,25 @@ func (s *Store) SetTargetPopulations(siteID uint32, pops []TargetPopulation) err
 	return s.AddSite(site)
 }
 
-func (s *Store) AddSite(site Site) error {
+func (s Store) AddSite(site pc.Site) error {
 	s.sites[site.ID] = site
 	return nil
 }
 
-func (s *Store) GetSite(siteID uint32) (Site, error) {
+func (s Store) GetSite(siteID uint32) (pc.Site, error) {
 	site, ok := s.sites[siteID]
 	if !ok {
-		return Site{}, ErrSiteNotFound
+		return pc.Site{}, pc.ErrPolicyNotFound
 	}
 	return site, nil
 }
 
-func (s *Store) SetPolicy(siteID uint32, species string, action PolicyAction) error {
+func (s Store) SetPolicy(siteID uint32, species string, action pc.PolicyAction) error {
 	site, ok := s.sites[siteID]
 	if !ok {
-		return ErrSiteNotFound
+		return pc.ErrSiteNotFound
 	}
-	policy := Policy{
+	policy := pc.Policy{
 		Species:   species,
 		Action:    action,
 		CreatedAt: time.Now(),
@@ -89,27 +57,27 @@ func (s *Store) SetPolicy(siteID uint32, species string, action PolicyAction) er
 	return nil
 }
 
-func (s *Store) GetPolicy(siteID uint32, species string) (Policy, error) {
+func (s Store) GetPolicy(siteID uint32, species string) (pc.Policy, error) {
 	site, ok := s.sites[siteID]
 	if !ok {
-		return Policy{}, ErrSiteNotFound
+		return pc.Policy{}, pc.ErrSiteNotFound
 	}
 	policy, ok := site.Policies[species]
 	if !ok {
-		return Policy{}, ErrPolicyNotFound
+		return pc.Policy{}, pc.ErrPolicyNotFound
 	}
 	return policy, nil
 }
 
-func (s *Store) DeletePolicy(siteID uint32, species string) (Policy, error) {
+func (s Store) DeletePolicy(siteID uint32, species string) (pc.Policy, error) {
 	site, ok := s.sites[siteID]
 	if !ok {
-		return Policy{}, ErrSiteNotFound
+		return pc.Policy{}, pc.ErrSiteNotFound
 	}
 
 	p, ok := site.Policies[species]
 	if !ok {
-		return Policy{}, ErrPolicyNotFound
+		return pc.Policy{}, pc.ErrPolicyNotFound
 	}
 	p.DeletedAt = time.Now()
 	return p, nil
