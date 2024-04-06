@@ -1,6 +1,6 @@
 -- +goose Up
 CREATE TABLE target_populations (
-  id integer AUTO_INCREMENT,
+  id integer NOT NULL PRIMARY KEY,
   created_at text NOT NULL,
   site_id integer NOT NULL REFERENCES sites (id) ON DELETE CASCADE,
   species_id integer NOT NULL REFERENCES species (id) ON DELETE CASCADE,

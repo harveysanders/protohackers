@@ -38,7 +38,7 @@ func (s Store) AddSite(ctx context.Context, site pc.Site) error {
 func (s Store) GetSite(ctx context.Context, siteID uint32) (pc.Site, error) {
 	site, ok := s.sites[siteID]
 	if !ok {
-		return pc.Site{}, pc.ErrPolicyNotFound
+		return pc.Site{}, pc.ErrSiteNotFound
 	}
 	return site, nil
 }

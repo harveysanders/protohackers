@@ -100,6 +100,62 @@ func (q *Queries) GetSite(ctx context.Context, id uint32) (Site, error) {
 	return i, err
 }
 
+const getSiteTargetPopulations = `-- name: GetSiteTargetPopulations :many
+SELECT
+  target_populations.id, target_populations.created_at, target_populations.site_id, target_populations.species_id, target_populations.min, target_populations.max,
+  species.id, species.created_at, species.name
+FROM
+  target_populations
+  JOIN species ON target_populations.species_id = species.id
+WHERE
+  site_id = ?
+`
+
+type GetSiteTargetPopulationsRow struct {
+	ID          uint32
+	CreatedAt   string
+	SiteID      uint32
+	SpeciesID   uint32
+	Min         uint32
+	Max         uint32
+	ID_2        uint32
+	CreatedAt_2 string
+	Name        string
+}
+
+func (q *Queries) GetSiteTargetPopulations(ctx context.Context, siteID uint32) ([]GetSiteTargetPopulationsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getSiteTargetPopulations, siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetSiteTargetPopulationsRow
+	for rows.Next() {
+		var i GetSiteTargetPopulationsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CreatedAt,
+			&i.SiteID,
+			&i.SpeciesID,
+			&i.Min,
+			&i.Max,
+			&i.ID_2,
+			&i.CreatedAt_2,
+			&i.Name,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getSpeciesByName = `-- name: GetSpeciesByName :one
 SELECT
   id, created_at, name

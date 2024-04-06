@@ -8,6 +8,16 @@ WHERE
 LIMIT
   1;
 
+-- name: GetSiteTargetPopulations :many
+SELECT
+  target_populations.*,
+  species.*
+FROM
+  target_populations
+  JOIN species ON target_populations.species_id = species.id
+WHERE
+  site_id = ?;
+
 -- name: CreateSite :one
 INSERT INTO
   sites (id, created_at)

@@ -2,6 +2,8 @@ package sqlite
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -35,12 +37,12 @@ func (s *SiteService) AddSite(ctx context.Context, site pc.Site) error {
 		CreatedAt: time.Now().Format(time.RFC3339),
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("queries.CreateSite: %w", err)
 	}
 	// TODO: Batch these inserts
 	for _, pop := range site.TargetPopulations {
 		species, err := s.queries.GetSpeciesByName(ctx, pop.Species)
-		if err != nil {
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("queries.GetSpeciesByName: %w", err)
 		}
 		if species.Name == "" {
@@ -56,6 +58,7 @@ func (s *SiteService) AddSite(ctx context.Context, site pc.Site) error {
 			SpeciesID: species.ID,
 			Min:       pop.Min,
 			Max:       pop.Max,
+			CreatedAt: time.Now().Format(time.RFC3339),
 		})
 		if err != nil {
 			return fmt.Errorf("queries.CreateTargetPopulation: %w", err)
@@ -65,15 +68,24 @@ func (s *SiteService) AddSite(ctx context.Context, site pc.Site) error {
 }
 
 func (s *SiteService) GetSite(ctx context.Context, siteID uint32) (pc.Site, error) {
-	dbSite, err := s.queries.GetSite(ctx, siteID)
+	pops, err := s.queries.GetSiteTargetPopulations(ctx, siteID)
 	if err != nil {
-		return pc.Site{}, err
+		return pc.Site{}, fmt.Errorf("queries.GetSiteTargetPopulations: %w", err)
 	}
-	return pc.Site{
-		ID:                dbSite.ID,
+	site := pc.Site{
+		ID:                siteID,
 		Policies:          make(map[string]pc.Policy),
-		TargetPopulations: make(map[string]pc.TargetPopulation),
-	}, nil
+		TargetPopulations: make(map[string]pc.TargetPopulation, len(pops)),
+	}
+	for _, pop := range pops {
+		site.TargetPopulations[pop.Name] = pc.TargetPopulation{
+			Species: pop.Name,
+			Min:     pop.Min,
+			Max:     pop.Max,
+		}
+	}
+
+	return site, nil
 }
 
 func (s *SiteService) SetPolicy(ctx context.Context, siteID uint32, species string, action pc.PolicyAction) error {
@@ -89,5 +101,20 @@ func (s *SiteService) DeletePolicy(ctx context.Context, siteID uint32, species s
 }
 
 func (s *SiteService) SetTargetPopulations(ctx context.Context, siteID uint32, pops []pc.TargetPopulation) error {
+	site, err := s.GetSite(ctx, siteID)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		site = pc.Site{ID: siteID}
+	}
+
+	if site.TargetPopulations == nil || len(site.TargetPopulations) == 0 {
+		site.TargetPopulations = make(map[string]pc.TargetPopulation, len(pops))
+		for _, pop := range pops {
+			site.TargetPopulations[pop.Species] = pop
+		}
+		return s.AddSite(ctx, site)
+	}
 	return nil
 }

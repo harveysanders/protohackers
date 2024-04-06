@@ -28,7 +28,7 @@ type Species struct {
 }
 
 type TargetPopulation struct {
-	ID        interface{}
+	ID        uint32
 	CreatedAt string
 	SiteID    uint32
 	SpeciesID uint32
