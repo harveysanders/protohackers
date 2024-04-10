@@ -3,3 +3,4 @@ localtonet
 *.pcap
 *.sqlite*
 logs
+__debug_bin*

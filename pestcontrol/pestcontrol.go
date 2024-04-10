@@ -6,8 +6,9 @@ import (
 )
 
 var (
-	ErrSiteNotFound   = errors.New("site not found")
-	ErrPolicyNotFound = errors.New("policy not found")
+	ErrObservationNotFound = errors.New("observation not found")
+	ErrPolicyNotFound      = errors.New("policy not found")
+	ErrSiteNotFound        = errors.New("site not found")
 )
 
 type Site struct {
@@ -21,6 +22,13 @@ type TargetPopulation struct {
 	Species string
 	Min     uint32
 	Max     uint32
+}
+
+type Observation struct {
+	Site     uint32
+	Species  string
+	Count    uint32
+	ClientID uint32
 }
 
 type Policy struct {

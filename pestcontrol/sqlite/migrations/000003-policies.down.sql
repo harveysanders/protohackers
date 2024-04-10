@@ -1,2 +1,2 @@
 -- +goose Down
-DROP TABLE policies;
+DROP TABLE IF EXISTS policies;

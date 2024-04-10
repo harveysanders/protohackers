@@ -8,12 +8,21 @@ import (
 	"database/sql"
 )
 
+type Observation struct {
+	ID        uint32
+	CreatedAt string
+	SiteID    uint32
+	SpeciesID uint32
+	Count     uint32
+	ClientID  uint32
+}
+
 type Policy struct {
 	ID           uint32
 	CreatedAt    string
 	DeletedAt    sql.NullString
 	Action       uint32
-	PopulationID sql.NullInt64
+	PopulationID uint32
 }
 
 type Site struct {

@@ -40,7 +40,10 @@ type Store interface {
 	GetPolicy(ctx context.Context, siteID uint32, species string) (Policy, error)
 	DeletePolicy(ctx context.Context, siteID uint32, species string) (Policy, error)
 	SetTargetPopulations(ctx context.Context, siteID uint32, pops []TargetPopulation) error
+	RecordObservation(ctx context.Context, o Observation) error
+	GetObservation(ctx context.Context, siteID uint32, species string) (Observation, error)
 }
+
 type Server struct {
 	authSrv   *AuthorityServer
 	logger    *log.Logger
@@ -75,7 +78,7 @@ func (s *Server) ListenAndServe(addr string) error {
 }
 
 func (s *Server) Serve(l net.Listener) error {
-	var connID int32
+	var connID uint32
 	for {
 		connID++
 		conn, err := l.Accept()
@@ -102,7 +105,7 @@ func (s *Server) Close() error {
 func (s *Server) handleClient(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
-	connID, ok := ctx.Value(ctxKeyConnectionID).(int32)
+	connID, ok := ctx.Value(ctxKeyConnectionID).(uint32)
 	if !ok {
 		s.logger.Println("invalid connection ID in context")
 		return
@@ -192,6 +195,16 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 	if ctx.Done() != nil {
 		return nil
 	}
+
+	clientID, ok := ctx.Value(ctxKeyConnectionID).(uint32)
+	if !ok {
+		return fmt.Errorf("invalid connection ID in context")
+	}
+
+	if err := validateSiteVisit(observation); err != nil {
+		return fmt.Errorf("observation.validate: %w", err)
+	}
+
 	// Check if the server already has a connection to the specified site.
 	s.authSrv.mu.RLock()
 	siteClient, ok := s.authSrv.sites[observation.Site]
@@ -200,15 +213,15 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 	// if not, create a new connection and get the target populations.
 	if !ok {
 		siteClient = Client{}
-		popResp, err := siteClient.establishSiteConnection(ctx, s.authSrv.addr, observation.Site)
+		resp, err := siteClient.establishSiteConnection(ctx, s.authSrv.addr, observation.Site)
 		if err != nil {
 			return fmt.Errorf("establishSiteConnection: %w", err)
 		}
 
-		s.logger.Printf("received %d target populations from site %d\n", len(popResp.Populations), popResp.Site)
-		pops := make([]TargetPopulation, 0, len(popResp.Populations))
+		s.logger.Printf("received %d target populations from site %d\n", len(resp.Populations), resp.Site)
+		pops := make([]TargetPopulation, 0, len(resp.Populations))
 
-		for _, v := range popResp.Populations {
+		for _, v := range resp.Populations {
 			pops = append(pops, TargetPopulation{
 				Species: v.Species,
 				Min:     v.Min,
@@ -231,32 +244,48 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 	}
 
 	for _, observed := range observation.Populations {
-		target, ok := site.TargetPopulations[observed.Species]
-		if !ok {
-			s.logger.Printf("(site: %d)\nspecies %q not found in target populations\n", observation.Site, observed.Species)
-			continue
+		err := s.siteStore.RecordObservation(ctx, Observation{
+			Site:     observation.Site,
+			Species:  observed.Species,
+			Count:    observed.Count,
+			ClientID: clientID,
+		})
+		if err != nil {
+			return fmt.Errorf("RecordObservation: %w", err)
+		}
+	}
+
+	for speciesName, target := range site.TargetPopulations {
+		// Get the latest observation for the species.
+		observed, err := s.siteStore.GetObservation(ctx, observation.Site, speciesName)
+		if err != nil {
+			if !errors.Is(err, ErrObservationNotFound) {
+				return fmt.Errorf("GetObservation: %w", err)
+			}
+			// If the species is not observed, assume count is 0 and create the appropriate policy.
+			// Use go's zero value for uint32 as the count.
 		}
 
 		// Check if the observed population is within the target range.
 		if observed.Count < target.Min {
-			s.logger.Printf("(site: %d)\nspecies %q population is below target range\n", observation.Site, observed.Species)
-			if err := s.siteStore.SetPolicy(ctx, observation.Site, observed.Species, Conserve); err != nil {
+			s.logger.Printf("(site: %d)\nspecies %q population is below target range\n", observation.Site, speciesName)
+			if err := s.siteStore.SetPolicy(ctx, observation.Site, speciesName, Conserve); err != nil {
 				return fmt.Errorf("SetPolicy: %w", err)
 			}
-			return siteClient.createPolicy(observed.Species, proto.Conserve)
+			return siteClient.createPolicy(speciesName, proto.Conserve)
 		}
 
 		if observed.Count > target.Max {
-			s.logger.Printf("(site: %d)\nspecies %q population is above target range\n", observation.Site, observed.Species)
-			if err := s.siteStore.SetPolicy(ctx, observation.Site, observed.Species, Cull); err != nil {
+			s.logger.Printf("(site: %d)\nspecies %q population is above target range\n", observation.Site, speciesName)
+			if err := s.siteStore.SetPolicy(ctx, observation.Site, speciesName, Cull); err != nil {
 				return fmt.Errorf("SetPolicy: %w", err)
 			}
-			return siteClient.createPolicy(observed.Species, proto.Cull)
+			return siteClient.createPolicy(speciesName, proto.Cull)
 		}
 
 		if target.Min <= observed.Count && observed.Count <= target.Max {
-			s.logger.Printf("(site: %d)\nspecies %q population is within target range\n", observation.Site, observed.Species)
-			p, err := s.siteStore.DeletePolicy(ctx, observation.Site, observed.Species)
+			s.logger.Printf("(site: %d)\nspecies %q population is within target range\n", observation.Site, speciesName)
+			p, err := s.siteStore.DeletePolicy(ctx, observation.Site, speciesName)
 			if err != nil {
 				if errors.Is(err, ErrPolicyNotFound) {
 					continue
@@ -265,6 +294,20 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 			}
 			return siteClient.deletePolicy(p.ID)
 		}
+	}
+	return nil
+}
+
+// validateSiteVisit checks if the populations fields contain multiple conflicting counts for the same species. Non-conflicting duplicates are allowed.
+func validateSiteVisit(sv proto.MsgSiteVisit) error {
+	speciesCounts := make(map[string]uint32, len(sv.Populations))
+	for _, p := range sv.Populations {
+		if count, ok := speciesCounts[p.Species]; ok {
+			if count != p.Count {
+				return fmt.Errorf("conflicting counts for species %q, ([%d], [%d])", p.Species, count, p.Count)
+			}
+		}
+		speciesCounts[p.Species] = p.Count
 	}
 	return nil
 }

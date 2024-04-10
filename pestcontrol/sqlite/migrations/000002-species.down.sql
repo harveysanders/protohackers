@@ -1,2 +1,2 @@
 -- +goose Down
-DROP TABLE species;
+DROP TABLE IF EXISTS species;

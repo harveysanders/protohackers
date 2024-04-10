@@ -15,15 +15,6 @@ type SiteService struct {
 	queries *sqlc.Queries
 }
 
-//	type Store interface {
-//		AddSite(site Site) error
-//		GetSite(siteID uint32) (Site, error)
-//		SetPolicy(siteID uint32, species string, action PolicyAction) error
-//		GetPolicy(siteID uint32, species string) (Policy, error)
-//		DeletePolicy(siteID uint32, species string) (Policy, error)
-//		SetTargetPopulations(siteID uint32, pops []TargetPopulation) error
-//	}
-
 func NewSiteService(db sqlc.DBTX) *SiteService {
 	queries := sqlc.New(db)
 	return &SiteService{
@@ -89,15 +80,75 @@ func (s *SiteService) GetSite(ctx context.Context, siteID uint32) (pc.Site, erro
 }
 
 func (s *SiteService) SetPolicy(ctx context.Context, siteID uint32, species string, action pc.PolicyAction) error {
+	target, err := s.queries.GetSiteSpeciesTargetPopulation(ctx, sqlc.GetSiteSpeciesTargetPopulationParams{
+		SiteID: siteID,
+		Name:   species,
+	})
+	if err != nil {
+		return fmt.Errorf("queries.GetSiteSpeciesTargetPopulation: %w", err)
+	}
+
+	_, err = s.queries.CreatePolicy(ctx, sqlc.CreatePolicyParams{
+		PopulationID: target.ID,
+		Action:       uint32(action),
+		CreatedAt:    time.Now().Format(time.RFC3339),
+	})
+	if err != nil {
+		return fmt.Errorf("queries.CreatePolicy: %w", err)
+	}
 	return nil
 }
 
 func (s *SiteService) GetPolicy(ctx context.Context, siteID uint32, species string) (pc.Policy, error) {
-	return pc.Policy{}, nil
+	p, err := s.queries.GetPolicyBySiteSpecies(ctx, sqlc.GetPolicyBySiteSpeciesParams{
+		SiteID: siteID,
+		Name:   species,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return pc.Policy{}, pc.ErrPolicyNotFound
+		}
+		return pc.Policy{}, fmt.Errorf("queries.GetPolicyBySiteSpecies: %w", err)
+	}
+	createdAt, err := time.Parse(time.RFC3339, p.CreatedAt)
+	if err != nil {
+		return pc.Policy{}, fmt.Errorf("createdAt time.Parse: %w", err)
+	}
+	return pc.Policy{
+		ID:        p.ID,
+		Action:    pc.PolicyAction(p.Action),
+		CreatedAt: createdAt,
+	}, nil
 }
 
 func (s *SiteService) DeletePolicy(ctx context.Context, siteID uint32, species string) (pc.Policy, error) {
-	return pc.Policy{}, nil
+	p, err := s.GetPolicy(ctx, siteID, species)
+	if err != nil {
+		return pc.Policy{}, fmt.Errorf("GetPolicy: %w", err)
+	}
+
+	deleted, err := s.queries.DeletePolicy(ctx, sqlc.DeletePolicyParams{
+		ID: p.ID,
+		DeletedAt: sql.NullString{
+			String: time.Now().Format(time.RFC3339),
+			Valid:  true,
+		},
+	})
+	if err != nil {
+		return pc.Policy{}, fmt.Errorf("queries.DeletePolicy: %w", err)
+	}
+
+	deletedAt, err := time.Parse(time.RFC3339, deleted.DeletedAt.String)
+	if err != nil {
+		return pc.Policy{}, fmt.Errorf("deletedAt time.Parse: %w", err)
+	}
+	d := pc.Policy{
+		ID:        deleted.ID,
+		Action:    pc.PolicyAction(deleted.Action),
+		CreatedAt: deletedAt,
+		DeletedAt: deletedAt,
+	}
+	return d, nil
 }
 
 func (s *SiteService) SetTargetPopulations(ctx context.Context, siteID uint32, pops []pc.TargetPopulation) error {
@@ -117,4 +168,63 @@ func (s *SiteService) SetTargetPopulations(ctx context.Context, siteID uint32, p
 		return s.AddSite(ctx, site)
 	}
 	return nil
+}
+
+func (s *SiteService) RecordObservation(ctx context.Context, obs pc.Observation) error {
+	species, err := s.getOrCreateSpecies(ctx, obs.Species)
+	if err != nil {
+		return fmt.Errorf("getOrCreateSpecies: %w", err)
+	}
+	_, err = s.queries.CreateObservation(ctx, sqlc.CreateObservationParams{
+		SiteID:    obs.Site,
+		SpeciesID: species.ID,
+		Count:     obs.Count,
+		CreatedAt: time.Now().Format(time.RFC3339),
+		ClientID:  obs.ClientID,
+	})
+	if err != nil {
+		return fmt.Errorf("queries.CreateObservation: %w", err)
+	}
+	return nil
+}
+
+func (s *SiteService) GetObservation(ctx context.Context, siteID uint32, speciesName string) (pc.Observation, error) {
+	species, err := s.getOrCreateSpecies(ctx, speciesName)
+	if err != nil {
+		return pc.Observation{}, fmt.Errorf("getOrCreateSpecies: %w", err)
+	}
+
+	o, err := s.queries.GetObservationBySpecies(ctx, sqlc.GetObservationBySpeciesParams{
+		SiteID:    siteID,
+		SpeciesID: species.ID,
+	})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return pc.Observation{}, pc.ErrObservationNotFound
+		}
+		return pc.Observation{}, fmt.Errorf("queries.GetObservationBySpecies: %w", err)
+	}
+	return pc.Observation{
+		Site:    siteID,
+		Species: speciesName,
+		Count:   o.Count,
+	}, nil
+}
+
+func (s *SiteService) getOrCreateSpecies(ctx context.Context, name string) (sqlc.Species, error) {
+	species, err := s.queries.GetSpeciesByName(ctx, name)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			species, err = s.queries.CreateSpecies(ctx, sqlc.CreateSpeciesParams{
+				Name:      name,
+				CreatedAt: time.Now().Format(time.RFC3339),
+			})
+			if err != nil {
+				return sqlc.Species{}, fmt.Errorf("queries.CreateSpecies: %w", err)
+			}
+		} else {
+			return sqlc.Species{}, fmt.Errorf("queries.GetSpeciesByName: %w", err)
+		}
+	}
+	return species, nil
 }

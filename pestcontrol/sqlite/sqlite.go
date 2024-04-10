@@ -48,7 +48,7 @@ func NewDB(dsn string) *DB {
 }
 
 // Open opens the database connection.
-func (db *DB) Open() (err error) {
+func (db *DB) Open(drop bool) (err error) {
 	// Ensure a DSN is set before attempting to open the database.
 	if db.DSN == "" {
 		return fmt.Errorf("dsn required")
@@ -78,8 +78,14 @@ func (db *DB) Open() (err error) {
 		return fmt.Errorf("foreign keys pragma: %w", err)
 	}
 
+	if drop {
+		if err := db.migrateDown(); err != nil {
+			return fmt.Errorf("migrateDown: %w", err)
+		}
+	}
+
 	if err := db.migrateUp(); err != nil {
-		return fmt.Errorf("migrate: %w", err)
+		return fmt.Errorf("migrateUp: %w", err)
 	}
 
 	return nil
@@ -100,6 +106,17 @@ func (db *DB) migrateUp() error {
 	}
 	if err := migrate.Up(context.Background(), db.DB, dirFS); err != nil {
 		return fmt.Errorf("migrate up: %w", err)
+	}
+	return nil
+}
+
+func (db *DB) migrateDown() error {
+	dirFS, err := fs.Sub(migrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("fs.Sub: %w", err)
+	}
+	if err := migrate.Down(context.Background(), db.DB, dirFS); err != nil {
+		return fmt.Errorf("migrate down: %w", err)
 	}
 	return nil
 }

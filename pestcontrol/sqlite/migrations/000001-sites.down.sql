@@ -1,2 +1,2 @@
 -- +goose Down
-DROP TABLE sites;
+DROP TABLE IF EXISTS sites;

@@ -8,18 +8,23 @@ import (
 	"time"
 
 	"github.com/harveysanders/protohackers/pestcontrol"
-	"github.com/harveysanders/protohackers/pestcontrol/inmem"
 	"github.com/harveysanders/protohackers/pestcontrol/proto"
+	"github.com/harveysanders/protohackers/pestcontrol/sqlite"
 	"github.com/stretchr/testify/require"
 )
 
 func TestServer(t *testing.T) {
 	t.SkipNow()
-	testStore := inmem.NewStore()
+	db := sqlite.NewDB(":memory:")
+	err := db.Open(true)
+	require.NoError(t, err)
+
+	siteService := sqlite.NewSiteService(db.DB)
+
 	srv := pestcontrol.NewServer(
 		nil,
 		pestcontrol.ServerConfig{AuthServerAddr: "pestcontrol.protohackers.com:20547"},
-		testStore,
+		siteService,
 	)
 
 	go func() {
@@ -67,7 +72,7 @@ func TestServer(t *testing.T) {
 
 	time.Sleep(740 * time.Millisecond)
 
-	policy, err := testStore.GetPolicy(context.TODO(), 900085189, "Aedes aegypti")
+	policy, err := siteService.GetPolicy(context.TODO(), 900085189, "Aedes aegypti")
 	require.NoError(t, err)
 	require.Equal(t, pestcontrol.Cull, policy.Action)
 }

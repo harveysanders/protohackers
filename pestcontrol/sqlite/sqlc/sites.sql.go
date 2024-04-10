@@ -7,7 +7,69 @@ package sqlc
 
 import (
 	"context"
+	"database/sql"
 )
+
+const createObservation = `-- name: CreateObservation :one
+INSERT INTO
+  observations (site_id, species_id, count, created_at, client_id)
+VALUES
+  (?, ?, ?, ?, ?) RETURNING id, created_at, site_id, species_id, count, client_id
+`
+
+type CreateObservationParams struct {
+	SiteID    uint32
+	SpeciesID uint32
+	Count     uint32
+	CreatedAt string
+	ClientID  uint32
+}
+
+func (q *Queries) CreateObservation(ctx context.Context, arg CreateObservationParams) (Observation, error) {
+	row := q.db.QueryRowContext(ctx, createObservation,
+		arg.SiteID,
+		arg.SpeciesID,
+		arg.Count,
+		arg.CreatedAt,
+		arg.ClientID,
+	)
+	var i Observation
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.SiteID,
+		&i.SpeciesID,
+		&i.Count,
+		&i.ClientID,
+	)
+	return i, err
+}
+
+const createPolicy = `-- name: CreatePolicy :one
+INSERT INTO
+  policies (population_id, action, created_at)
+VALUES
+  (?, ?, ?) RETURNING id, created_at, deleted_at, "action", population_id
+`
+
+type CreatePolicyParams struct {
+	PopulationID uint32
+	Action       uint32
+	CreatedAt    string
+}
+
+func (q *Queries) CreatePolicy(ctx context.Context, arg CreatePolicyParams) (Policy, error) {
+	row := q.db.QueryRowContext(ctx, createPolicy, arg.PopulationID, arg.Action, arg.CreatedAt)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.DeletedAt,
+		&i.Action,
+		&i.PopulationID,
+	)
+	return i, err
+}
 
 const createSite = `-- name: CreateSite :one
 INSERT INTO
@@ -82,6 +144,119 @@ func (q *Queries) CreateTargetPopulation(ctx context.Context, arg CreateTargetPo
 	return i, err
 }
 
+const deletePolicy = `-- name: DeletePolicy :one
+UPDATE policies
+SET
+  deleted_at = ?
+WHERE
+  id = ? RETURNING id, created_at, deleted_at, "action", population_id
+`
+
+type DeletePolicyParams struct {
+	DeletedAt sql.NullString
+	ID        uint32
+}
+
+func (q *Queries) DeletePolicy(ctx context.Context, arg DeletePolicyParams) (Policy, error) {
+	row := q.db.QueryRowContext(ctx, deletePolicy, arg.DeletedAt, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.DeletedAt,
+		&i.Action,
+		&i.PopulationID,
+	)
+	return i, err
+}
+
+const getObservationBySpecies = `-- name: GetObservationBySpecies :one
+SELECT
+  id, created_at, site_id, species_id, count, client_id
+FROM
+  observations
+WHERE
+  site_id = ?
+  AND species_id = ?
+ORDER BY
+  created_at DESC
+`
+
+type GetObservationBySpeciesParams struct {
+	SiteID    uint32
+	SpeciesID uint32
+}
+
+func (q *Queries) GetObservationBySpecies(ctx context.Context, arg GetObservationBySpeciesParams) (Observation, error) {
+	row := q.db.QueryRowContext(ctx, getObservationBySpecies, arg.SiteID, arg.SpeciesID)
+	var i Observation
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.SiteID,
+		&i.SpeciesID,
+		&i.Count,
+		&i.ClientID,
+	)
+	return i, err
+}
+
+const getPolicyBySiteSpecies = `-- name: GetPolicyBySiteSpecies :one
+SELECT
+  policies.id, policies.created_at, deleted_at, "action", population_id, target_populations.id, target_populations.created_at, site_id, species_id, min, max, species.id, species.created_at, name
+FROM
+  policies
+  JOIN target_populations ON policies.population_id = target_populations.id
+  JOIN species ON target_populations.species_id = species.id
+WHERE
+  target_populations.site_id = ?
+  AND species.name = ?
+`
+
+type GetPolicyBySiteSpeciesParams struct {
+	SiteID uint32
+	Name   string
+}
+
+type GetPolicyBySiteSpeciesRow struct {
+	ID           uint32
+	CreatedAt    string
+	DeletedAt    sql.NullString
+	Action       uint32
+	PopulationID uint32
+	ID_2         uint32
+	CreatedAt_2  string
+	SiteID       uint32
+	SpeciesID    uint32
+	Min          uint32
+	Max          uint32
+	ID_3         uint32
+	CreatedAt_3  string
+	Name         string
+}
+
+func (q *Queries) GetPolicyBySiteSpecies(ctx context.Context, arg GetPolicyBySiteSpeciesParams) (GetPolicyBySiteSpeciesRow, error) {
+	row := q.db.QueryRowContext(ctx, getPolicyBySiteSpecies, arg.SiteID, arg.Name)
+	var i GetPolicyBySiteSpeciesRow
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.DeletedAt,
+		&i.Action,
+		&i.PopulationID,
+		&i.ID_2,
+		&i.CreatedAt_2,
+		&i.SiteID,
+		&i.SpeciesID,
+		&i.Min,
+		&i.Max,
+		&i.ID_3,
+		&i.CreatedAt_3,
+		&i.Name,
+	)
+	return i, err
+}
+
 const getSite = `-- name: GetSite :one
 SELECT
   id, created_at
@@ -97,6 +272,99 @@ func (q *Queries) GetSite(ctx context.Context, id uint32) (Site, error) {
 	row := q.db.QueryRowContext(ctx, getSite, id)
 	var i Site
 	err := row.Scan(&i.ID, &i.CreatedAt)
+	return i, err
+}
+
+const getSiteObservationForSpecies = `-- name: GetSiteObservationForSpecies :many
+SELECT
+  id, created_at, site_id, species_id, count, client_id
+FROM
+  observations
+WHERE
+  site_id = ?
+  AND species_id = ?
+ORDER BY
+  created_at DESC
+`
+
+type GetSiteObservationForSpeciesParams struct {
+	SiteID    uint32
+	SpeciesID uint32
+}
+
+func (q *Queries) GetSiteObservationForSpecies(ctx context.Context, arg GetSiteObservationForSpeciesParams) ([]Observation, error) {
+	rows, err := q.db.QueryContext(ctx, getSiteObservationForSpecies, arg.SiteID, arg.SpeciesID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Observation
+	for rows.Next() {
+		var i Observation
+		if err := rows.Scan(
+			&i.ID,
+			&i.CreatedAt,
+			&i.SiteID,
+			&i.SpeciesID,
+			&i.Count,
+			&i.ClientID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getSiteSpeciesTargetPopulation = `-- name: GetSiteSpeciesTargetPopulation :one
+SELECT
+  target_populations.id, target_populations.created_at, target_populations.site_id, target_populations.species_id, target_populations.min, target_populations.max,
+  species.id, species.created_at, species.name
+FROM
+  target_populations
+  JOIN species ON target_populations.species_id = species.id
+WHERE
+  site_id = ?
+  AND species.name = ?
+`
+
+type GetSiteSpeciesTargetPopulationParams struct {
+	SiteID uint32
+	Name   string
+}
+
+type GetSiteSpeciesTargetPopulationRow struct {
+	ID          uint32
+	CreatedAt   string
+	SiteID      uint32
+	SpeciesID   uint32
+	Min         uint32
+	Max         uint32
+	ID_2        uint32
+	CreatedAt_2 string
+	Name        string
+}
+
+func (q *Queries) GetSiteSpeciesTargetPopulation(ctx context.Context, arg GetSiteSpeciesTargetPopulationParams) (GetSiteSpeciesTargetPopulationRow, error) {
+	row := q.db.QueryRowContext(ctx, getSiteSpeciesTargetPopulation, arg.SiteID, arg.Name)
+	var i GetSiteSpeciesTargetPopulationRow
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.SiteID,
+		&i.SpeciesID,
+		&i.Min,
+		&i.Max,
+		&i.ID_2,
+		&i.CreatedAt_2,
+		&i.Name,
+	)
 	return i, err
 }
 

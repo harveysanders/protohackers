@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 
 	"github.com/harveysanders/protohackers/pestcontrol"
 	"github.com/harveysanders/protohackers/pestcontrol/sqlite"
@@ -47,8 +48,9 @@ func run(ctx context.Context) error {
 		dsn = DSN
 	}
 
+	dropTables, _ := strconv.ParseBool(os.Getenv("DROP_TABLES"))
 	db := sqlite.NewDB(dsn)
-	if err := db.Open(); err != nil {
+	if err := db.Open(dropTables); err != nil {
 		return fmt.Errorf("db.Open: %w", err)
 	}
 
