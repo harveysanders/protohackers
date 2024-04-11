@@ -47,19 +47,25 @@ func (q *Queries) CreateObservation(ctx context.Context, arg CreateObservationPa
 
 const createPolicy = `-- name: CreatePolicy :one
 INSERT INTO
-  policies (population_id, action, created_at)
+  policies (id, population_id, action, created_at)
 VALUES
-  (?, ?, ?) RETURNING id, created_at, deleted_at, "action", population_id
+  (?, ?, ?, ?) RETURNING id, created_at, deleted_at, "action", population_id
 `
 
 type CreatePolicyParams struct {
+	ID           uint32
 	PopulationID uint32
 	Action       uint32
 	CreatedAt    string
 }
 
 func (q *Queries) CreatePolicy(ctx context.Context, arg CreatePolicyParams) (Policy, error) {
-	row := q.db.QueryRowContext(ctx, createPolicy, arg.PopulationID, arg.Action, arg.CreatedAt)
+	row := q.db.QueryRowContext(ctx, createPolicy,
+		arg.ID,
+		arg.PopulationID,
+		arg.Action,
+		arg.CreatedAt,
+	)
 	var i Policy
 	err := row.Scan(
 		&i.ID,

@@ -95,22 +95,35 @@ func (c *Client) sendError(err error) error {
 	return nil
 }
 
-func (c *Client) createPolicy(species string, action proto.PolicyAction) error {
+func (c *Client) createPolicy(species string, action proto.PolicyAction) (proto.MsgPolicyResult, error) {
 	msg := proto.MsgCreatePolicy{
 		Species: species,
 		Action:  action,
 	}
 	payload, err := msg.MarshalBinary()
 	if err != nil {
-		return fmt.Errorf("msg.MarshalBinary: %v", err)
+		return proto.MsgPolicyResult{}, fmt.Errorf("msg.MarshalBinary: %v", err)
 	}
 	if _, err := c.bufW.Write(payload); err != nil {
-		return fmt.Errorf("c.bufW.Write: %w", err)
+		return proto.MsgPolicyResult{}, fmt.Errorf("c.bufW.Write: %w", err)
 	}
 	if err := c.bufW.Flush(); err != nil {
-		return fmt.Errorf("c.bufW.Flush: %w", err)
+		return proto.MsgPolicyResult{}, fmt.Errorf("c.bufW.Flush: %w", err)
 	}
-	return nil
+
+	var resp proto.Message
+	if _, err := resp.ReadFrom(c.bufR); err != nil {
+		return proto.MsgPolicyResult{}, fmt.Errorf("policy resp: respMsg.ReadFrom: %w", err)
+	}
+	if resp.Type != proto.MsgTypePolicyResult {
+		return proto.MsgPolicyResult{}, fmt.Errorf("policy resp: expected MsgTypePolicyResult, got %q", resp.Type.String())
+	}
+	policyResult, err := resp.ToMsgPolicyResult()
+	if err != nil {
+		return proto.MsgPolicyResult{}, fmt.Errorf("policy resp: respMsg.ToMsgPolicyResult: %w", err)
+	}
+
+	return policyResult, nil
 }
 
 func (c *Client) deletePolicy(policyID uint32) error {
@@ -124,6 +137,14 @@ func (c *Client) deletePolicy(policyID uint32) error {
 	}
 	if err := c.bufW.Flush(); err != nil {
 		return fmt.Errorf("c.bufW.Flush: %w", err)
+	}
+
+	var resp proto.Message
+	if _, err := resp.ReadFrom(c.bufR); err != nil {
+		return fmt.Errorf("deletePolicy resp: respMsg.ReadFrom: %w", err)
+	}
+	if resp.Type != proto.MsgTypeOK {
+		return fmt.Errorf("deletePolicy resp: expected MsgTypeOK, got %q", resp.Type.String())
 	}
 	return nil
 }

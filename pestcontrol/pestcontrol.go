@@ -2,6 +2,7 @@ package pestcontrol
 
 import (
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -45,3 +46,14 @@ const (
 	Cull     PolicyAction = 0x90
 	Conserve PolicyAction = 0xa0
 )
+
+func (a PolicyAction) String() string {
+	switch a {
+	case Cull:
+		return "Cull"
+	case Conserve:
+		return "Conserve"
+	default:
+		return fmt.Sprintf("unknown action: %x", int(a))
+	}
+}

@@ -79,7 +79,7 @@ func (s *SiteService) GetSite(ctx context.Context, siteID uint32) (pc.Site, erro
 	return site, nil
 }
 
-func (s *SiteService) SetPolicy(ctx context.Context, siteID uint32, species string, action pc.PolicyAction) error {
+func (s *SiteService) SetPolicy(ctx context.Context, policyID uint32, siteID uint32, species string, action pc.PolicyAction) error {
 	target, err := s.queries.GetSiteSpeciesTargetPopulation(ctx, sqlc.GetSiteSpeciesTargetPopulationParams{
 		SiteID: siteID,
 		Name:   species,
@@ -89,6 +89,7 @@ func (s *SiteService) SetPolicy(ctx context.Context, siteID uint32, species stri
 	}
 
 	_, err = s.queries.CreatePolicy(ctx, sqlc.CreatePolicyParams{
+		ID:           policyID,
 		PopulationID: target.ID,
 		Action:       uint32(action),
 		CreatedAt:    time.Now().Format(time.RFC3339),

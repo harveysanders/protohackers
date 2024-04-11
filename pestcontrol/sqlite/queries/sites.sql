@@ -74,9 +74,9 @@ ORDER BY
 
 -- name: CreatePolicy :one
 INSERT INTO
-  policies (population_id, action, created_at)
+  policies (id, population_id, action, created_at)
 VALUES
-  (?, ?, ?) RETURNING *;
+  (?, ?, ?, ?) RETURNING *;
 
 -- name: GetPolicyBySiteSpecies :one
 SELECT

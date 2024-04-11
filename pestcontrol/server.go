@@ -36,7 +36,7 @@ type AuthorityServer struct {
 type Store interface {
 	AddSite(ctx context.Context, site Site) error
 	GetSite(ctx context.Context, siteID uint32) (Site, error)
-	SetPolicy(ctx context.Context, siteID uint32, species string, action PolicyAction) error
+	SetPolicy(ctx context.Context, policyID uint32, siteID uint32, species string, action PolicyAction) error
 	GetPolicy(ctx context.Context, siteID uint32, species string) (Policy, error)
 	DeletePolicy(ctx context.Context, siteID uint32, species string) (Policy, error)
 	SetTargetPopulations(ctx context.Context, siteID uint32, pops []TargetPopulation) error
@@ -269,33 +269,78 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 		// Check if the observed population is within the target range.
 		if observed.Count < target.Min {
 			s.logger.Printf("(site: %d)\nspecies %q population is below target range\n", observation.Site, speciesName)
-			if err := s.siteStore.SetPolicy(ctx, observation.Site, speciesName, Conserve); err != nil {
-				return fmt.Errorf("SetPolicy: %w", err)
+			if err := s.setPolicy(ctx, siteClient, speciesName, Conserve); err != nil {
+				return fmt.Errorf("setPolicy: %w", err)
 			}
-			return siteClient.createPolicy(speciesName, proto.Conserve)
 		}
 
 		if observed.Count > target.Max {
 			s.logger.Printf("(site: %d)\nspecies %q population is above target range\n", observation.Site, speciesName)
-			if err := s.siteStore.SetPolicy(ctx, observation.Site, speciesName, Cull); err != nil {
-				return fmt.Errorf("SetPolicy: %w", err)
+
+			if err := s.setPolicy(ctx, siteClient, speciesName, Cull); err != nil {
+				return fmt.Errorf("setPolicy: %w", err)
 			}
-			return siteClient.createPolicy(speciesName, proto.Cull)
 		}
 
 		if target.Min <= observed.Count && observed.Count <= target.Max {
 			s.logger.Printf("(site: %d)\nspecies %q population is within target range\n", observation.Site, speciesName)
-			p, err := s.siteStore.DeletePolicy(ctx, observation.Site, speciesName)
-			if err != nil {
-				if errors.Is(err, ErrPolicyNotFound) {
-					continue
-				}
-				return fmt.Errorf("DeletePolicy: %w", err)
+			if err := s.deletePolicy(ctx, siteClient, speciesName); err != nil {
+				return fmt.Errorf("deletePolicy: %w", err)
 			}
-			return siteClient.deletePolicy(p.ID)
 		}
 	}
 	return nil
+}
+
+func (s *Server) setPolicy(ctx context.Context, siteClient Client, speciesName string, action PolicyAction) error {
+	// Check if we've already set a policy for the species.
+	existing, err := s.siteStore.GetPolicy(ctx, *siteClient.siteID, speciesName)
+	if err != nil {
+		if !errors.Is(err, ErrPolicyNotFound) {
+			return fmt.Errorf("GetPolicy: %w", err)
+		}
+		// Policy not found, create a new one.
+		resp, err := siteClient.createPolicy(speciesName, proto.PolicyAction(action))
+		if err != nil {
+			return fmt.Errorf("createPolicy: %w", err)
+		}
+
+		s.logger.Printf("new policy (id, %d) for species %q set to %q\n", resp.Policy, speciesName, action.String())
+		if err := s.siteStore.SetPolicy(ctx, resp.Policy, *siteClient.siteID, speciesName, Conserve); err != nil {
+			return fmt.Errorf("SetPolicy: %w", err)
+		}
+		return nil
+	}
+	// policy exists,
+	//  update it.
+	if existing.Action != action {
+		if err := s.deletePolicy(ctx, siteClient, speciesName); err != nil {
+			return fmt.Errorf("deletePolicy: %w", err)
+		}
+		resp, err := siteClient.createPolicy(speciesName, proto.PolicyAction(action))
+		if err != nil {
+			return fmt.Errorf("createPolicy: %w", err)
+		}
+		s.logger.Printf("new policy (id, %d) for species %q set to %q\n", resp.Policy, speciesName, action.String())
+		if err := s.siteStore.SetPolicy(ctx, resp.Policy, *siteClient.siteID, speciesName, Conserve); err != nil {
+			return fmt.Errorf("SetPolicy: %w", err)
+		}
+		return nil
+	}
+
+	s.logger.Printf("existing policy for species %q, set to %q updating to %q\n", speciesName, existing.Action.String(), action.String())
+	return nil
+}
+
+func (s *Server) deletePolicy(ctx context.Context, siteClient Client, speciesName string) error {
+	p, err := s.siteStore.DeletePolicy(ctx, *siteClient.siteID, speciesName)
+	if err != nil {
+		if errors.Is(err, ErrPolicyNotFound) {
+			return nil
+		}
+		return fmt.Errorf("DeletePolicy: %w", err)
+	}
+	return siteClient.deletePolicy(p.ID)
 }
 
 // validateSiteVisit checks if the populations fields contain multiple conflicting counts for the same species. Non-conflicting duplicates are allowed.

@@ -176,27 +176,6 @@ func TestMsgHello(t *testing.T) {
 }
 
 func TestMsgTargetPopulations(t *testing.T) {
-	// 	Hexadecimal:    Decoded:
-	// 54              TargetPopulations{
-	// 00 00 00 2c       (length 44)
-	// 00 00 30 39       site: 12345,
-	// 00 00 00 02       populations: (length 2) [
-	//                     {
-	// 00 00 00 03           species: (length 3)
-	// 64 6f 67                "dog",
-	// 00 00 00 01           min: 1,
-	// 00 00 00 03           max: 3,
-	//                     },
-	//                     {
-	// 00 00 00 03           species: (length 3)
-	// 72 61 74                "rat",
-	// 00 00 00 00           min: 0,
-	// 00 00 00 0a           max: 10,
-	//                     },
-	//                   ],
-	// 80                (checksum 0x80)
-	//                 }
-
 	input := []byte{
 		0x54,                   // TargetPopulations{
 		0x00, 0x00, 0x00, 0x2c, // (length 44)
@@ -235,6 +214,27 @@ func TestMsgTargetPopulations(t *testing.T) {
 	gotPopulations, err := gotMessage.ToMsgTargetPopulations()
 	require.NoError(t, err)
 	require.Equal(t, wantPopulations, gotPopulations)
+}
+
+func TestMsgPolicyResult(t *testing.T) {
+	input := []byte{
+		0x57,                   // PolicyResult{
+		0x00, 0x00, 0x00, 0x0a, // (length 10)
+		0x00, 0x00, 0x00, 0x7b, // policy: 123,
+		0x24, // (checksum 0x24)
+	}
+
+	wantPolicyResult := proto.MsgPolicyResult{Policy: 123}
+
+	var gotMessage proto.Message
+	_, err := gotMessage.ReadFrom(bytes.NewReader(input))
+	require.NoError(t, err)
+	require.Equal(t, gotMessage.Type, proto.MsgTypePolicyResult)
+	require.Equal(t, gotMessage.Len, uint32(10))
+
+	gotPolicyResult, err := gotMessage.ToMsgPolicyResult()
+	require.NoError(t, err)
+	require.Equal(t, wantPolicyResult, gotPolicyResult)
 }
 
 func TestMsgSiteVisit(t *testing.T) {

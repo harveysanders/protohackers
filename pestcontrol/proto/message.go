@@ -22,6 +22,31 @@ const (
 	MsgTypeSiteVisit         MsgType = 0x58
 )
 
+func (t MsgType) String() string {
+	switch t {
+	case MsgTypeHello:
+		return "Hello"
+	case MsgTypeError:
+		return "Error"
+	case MsgTypeOK:
+		return "OK"
+	case MsgTypeDialAuthority:
+		return "DialAuthority"
+	case MsgTypeTargetPopulations:
+		return "TargetPopulations"
+	case MsgTypeCreatePolicy:
+		return "CreatePolicy"
+	case MsgTypeDeletePolicy:
+		return "DeletePolicy"
+	case MsgTypePolicyResult:
+		return "PolicyResult"
+	case MsgTypeSiteVisit:
+		return "SiteVisit"
+	default:
+		return fmt.Sprintf("unknown message type: %x", byte(t))
+	}
+}
+
 var (
 	ErrShortMessage   = errors.New("message too short")
 	ErrContentTooLong = errors.New("content too long")
@@ -360,6 +385,20 @@ func (cp MsgCreatePolicy) MarshalBinary() ([]byte, error) {
 		Content: content,
 	}
 	return msg.MarshalBinary()
+}
+
+// MsgPolicyResult is sent by the Authority Server in response to a valid MsgCreatePolicy message. It contains the ID of the created policy.
+type MsgPolicyResult struct {
+	Policy uint32
+}
+
+func (m Message) ToMsgPolicyResult() (MsgPolicyResult, error) {
+	var pr MsgPolicyResult
+	if len(m.Content) < 4 {
+		return pr, ErrShortMessage
+	}
+	pr.Policy = binary.BigEndian.Uint32(m.Content)
+	return pr, nil
 }
 
 // MsgDeletePolicy is sent by the client to the Authority Server to delete an existing population management policy for a species at a site.
