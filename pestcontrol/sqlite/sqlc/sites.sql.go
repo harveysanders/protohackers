@@ -215,7 +215,8 @@ FROM
   JOIN target_populations ON policies.population_id = target_populations.id
   JOIN species ON target_populations.species_id = species.id
 WHERE
-  target_populations.site_id = ?
+  deleted_at IS NULL
+  AND target_populations.site_id = ?
   AND species.name = ?
 `
 

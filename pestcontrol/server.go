@@ -268,14 +268,14 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 
 		// Check if the observed population is within the target range.
 		if observed.Count < target.Min {
-			s.logger.Printf("(site: %d)\nspecies %q population is below target range\n", observation.Site, speciesName)
+			s.logger.Printf("(site: %d)\nspecies %q population is below target range\n\n", observation.Site, speciesName)
 			if err := s.setPolicy(ctx, siteClient, speciesName, Conserve); err != nil {
 				return fmt.Errorf("setPolicy: %w", err)
 			}
 		}
 
 		if observed.Count > target.Max {
-			s.logger.Printf("(site: %d)\nspecies %q population is above target range\n", observation.Site, speciesName)
+			s.logger.Printf("(site: %d)\nspecies %q population is above target range\n\n", observation.Site, speciesName)
 
 			if err := s.setPolicy(ctx, siteClient, speciesName, Cull); err != nil {
 				return fmt.Errorf("setPolicy: %w", err)
@@ -283,7 +283,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 		}
 
 		if target.Min <= observed.Count && observed.Count <= target.Max {
-			s.logger.Printf("(site: %d)\nspecies %q population is within target range\n", observation.Site, speciesName)
+			s.logger.Printf("(site: %d)\nspecies %q population is within target range\n\n", observation.Site, speciesName)
 			if err := s.deletePolicy(ctx, siteClient, speciesName); err != nil {
 				return fmt.Errorf("deletePolicy: %w", err)
 			}
@@ -305,8 +305,8 @@ func (s *Server) setPolicy(ctx context.Context, siteClient Client, speciesName s
 			return fmt.Errorf("createPolicy: %w", err)
 		}
 
-		s.logger.Printf("new policy (id, %d) for species %q set to %q\n", resp.Policy, speciesName, action.String())
-		if err := s.siteStore.SetPolicy(ctx, resp.Policy, *siteClient.siteID, speciesName, Conserve); err != nil {
+		s.logger.Printf("new policy (id, %d) for species %q set to %q\n", resp.PolicyID, speciesName, action.String())
+		if err := s.siteStore.SetPolicy(ctx, resp.PolicyID, *siteClient.siteID, speciesName, Conserve); err != nil {
 			return fmt.Errorf("SetPolicy: %w", err)
 		}
 		return nil
@@ -321,18 +321,19 @@ func (s *Server) setPolicy(ctx context.Context, siteClient Client, speciesName s
 		if err != nil {
 			return fmt.Errorf("createPolicy: %w", err)
 		}
-		s.logger.Printf("new policy (id, %d) for species %q set to %q\n", resp.Policy, speciesName, action.String())
-		if err := s.siteStore.SetPolicy(ctx, resp.Policy, *siteClient.siteID, speciesName, Conserve); err != nil {
+		s.logger.Printf("switching policy (%d - %q) to (%d - %q) for species %q\n", existing.ID, existing.Action.String(), resp.PolicyID, action.String(), speciesName)
+		if err := s.siteStore.SetPolicy(ctx, resp.PolicyID, *siteClient.siteID, speciesName, Conserve); err != nil {
 			return fmt.Errorf("SetPolicy: %w", err)
 		}
 		return nil
 	}
 
-	s.logger.Printf("existing policy for species %q, set to %q updating to %q\n", speciesName, existing.Action.String(), action.String())
+	s.logger.Printf("existing policy for species %q, already set to %q\n", speciesName, existing.Action.String())
 	return nil
 }
 
 func (s *Server) deletePolicy(ctx context.Context, siteClient Client, speciesName string) error {
+	s.logger.Printf("(site: %d)\ndeleting policy for species %q\n", *siteClient.siteID, speciesName)
 	p, err := s.siteStore.DeletePolicy(ctx, *siteClient.siteID, speciesName)
 	if err != nil {
 		if errors.Is(err, ErrPolicyNotFound) {

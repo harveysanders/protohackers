@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"os"
 	"testing"
 	"time"
 
@@ -13,66 +14,135 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+var dsn = os.Getenv("PESTCONTROL_TEST_DSN")
+
 func TestServer(t *testing.T) {
-	t.SkipNow()
-	db := sqlite.NewDB(":memory:")
-	err := db.Open(true)
-	require.NoError(t, err)
 
-	siteService := sqlite.NewSiteService(db.DB)
+	t.Run("sets the correct policy", func(t *testing.T) {
+		db := sqlite.NewDB(dsn)
+		err := db.Open(true)
+		require.NoError(t, err)
+		defer func() {
+			_ = db.Close()
+		}()
+		require.NoError(t, err)
 
-	srv := pestcontrol.NewServer(
-		nil,
-		pestcontrol.ServerConfig{AuthServerAddr: "pestcontrol.protohackers.com:20547"},
-		siteService,
-	)
-
-	go func() {
-		err := srv.ListenAndServe(":12345")
-		if err != nil {
-			t.Log(err)
-			return
+		pestcontrolAddr := "localhost:12345"
+		authorityAddr := "localhost:20547"
+		siteID := uint32(900085189)
+		species := "Ethiopian Buna Wusha"
+		targetPop := map[string]pestcontrol.TargetPopulation{}
+		targetPop[species] = pestcontrol.TargetPopulation{
+			Species: species,
+			Min:     10,
+			Max:     20,
 		}
-	}()
 
-	time.Sleep(500 * time.Millisecond)
+		// Set up mock Authority server
+		authServer := NewMockAuthorityServer()
+		authServer.sites[siteID] = pestcontrol.Site{
+			ID:                siteID,
+			TargetPopulations: targetPop,
+			Policies:          map[string]pestcontrol.Policy{},
+		}
 
-	client, err := net.Dial("tcp", "localhost:12345")
-	require.NoError(t, err)
+		go func() {
+			err := authServer.ListenAndServe(authorityAddr)
+			if err != nil {
+				t.Log(err)
+				return
+			}
+		}()
 
-	defer func() {
-		_ = client.Close()
-		_ = srv.Close()
-	}()
+		siteService := sqlite.NewSiteService(db.DB)
+		srv := pestcontrol.NewServer(
+			nil,
+			pestcontrol.ServerConfig{AuthServerAddr: authorityAddr},
+			siteService,
+		)
 
-	helloMsg := proto.MsgHello{}
-	msg, err := helloMsg.MarshalBinary()
-	require.NoError(t, err)
+		go func() {
+			err := srv.ListenAndServe(pestcontrolAddr)
+			if err != nil {
+				t.Log(err)
+				return
+			}
+		}()
 
-	_, err = client.Write(msg)
-	require.NoError(t, err)
+		// wait for server to start
+		time.Sleep(500 * time.Millisecond)
 
-	respData := make([]byte, 2048)
-	nRead, err := client.Read(respData)
-	require.NoError(t, err)
+		fieldClient, err := net.Dial("tcp", pestcontrolAddr)
+		require.NoError(t, err)
 
-	var resp proto.Message
-	_, err = resp.ReadFrom(bytes.NewReader(respData[:nRead]))
-	require.NoError(t, err)
-	_, err = resp.ToMsgHello()
-	require.NoError(t, err)
+		defer func() {
+			_ = fieldClient.Close()
+			_ = srv.Close()
+			_ = authServer.Close()
+		}()
 
-	observation := proto.MsgSiteVisit{Site: 900085189, Populations: []proto.PopulationCount{{Species: "Aedes aegypti", Count: 10}, {Species: "Anopheles gambiae", Count: 5}}}
+		// Clients sends initial "Hello" message
+		helloMsg := proto.MsgHello{}
+		msg, err := helloMsg.MarshalBinary()
+		require.NoError(t, err)
 
-	msg, err = observation.MarshalBinary()
-	require.NoError(t, err)
+		_, err = fieldClient.Write(msg)
+		require.NoError(t, err)
 
-	_, err = client.Write(msg)
-	require.NoError(t, err)
+		respData := make([]byte, 2048)
+		nRead, err := fieldClient.Read(respData)
+		require.NoError(t, err)
 
-	time.Sleep(740 * time.Millisecond)
+		var resp proto.Message
+		_, err = resp.ReadFrom(bytes.NewReader(respData[:nRead]))
+		require.NoError(t, err)
+		_, err = resp.ToMsgHello()
+		require.NoError(t, err)
 
-	policy, err := siteService.GetPolicy(context.TODO(), 900085189, "Aedes aegypti")
-	require.NoError(t, err)
-	require.Equal(t, pestcontrol.Cull, policy.Action)
+		// After "Hello" response,
+		// Send the Site Visit observation (species counts)
+		observation := proto.MsgSiteVisit{
+			Site:        siteID,
+			Populations: []proto.PopulationCount{{Species: species, Count: 9}},
+		}
+
+		msg, err = observation.MarshalBinary()
+		require.NoError(t, err)
+
+		_, err = fieldClient.Write(msg)
+		require.NoError(t, err)
+
+		<-authServer.policyChange
+		// The Pestcontrol service should have
+		// - created a new "Conserve" policy on the Authority server for the specified site
+		authSrvPolicy, ok := authServer.sites[siteID].Policies[species]
+		require.True(t, ok, "Authority server should have a policy for the site")
+		require.Equal(t, pestcontrol.Conserve, authSrvPolicy.Action)
+
+		// - and eventually recorded the policy in its own records
+		retryTick := time.NewTicker(100 * time.Millisecond)
+		ctx, cancel := context.WithDeadline(
+			context.Background(),
+			time.Now().Add(3*time.Second),
+		)
+
+		defer retryTick.Stop()
+		defer cancel()
+
+		for {
+			select {
+			case <-ctx.Done():
+				t.Fatal("timed out waiting for policy to be recorded")
+			case <-retryTick.C:
+				policy, err := siteService.GetPolicy(ctx, siteID, species)
+				if err != nil {
+					// Retry if policy not yet recorded in the Pestcontrol DB
+					require.ErrorIs(t, err, pestcontrol.ErrPolicyNotFound)
+					continue
+				}
+				require.Equal(t, pestcontrol.Conserve, policy.Action)
+				return
+			}
+		}
+	})
 }

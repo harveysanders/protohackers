@@ -69,18 +69,14 @@ func (m *Message) ReadFrom(r io.Reader) (int64, error) {
 	tr := io.TeeReader(r, &fullMsg)
 
 	// Type is the first byte
-	rawType := make([]byte, 1)
-	if _, err := io.ReadFull(tr, rawType); err != nil {
-		return int64(fullMsg.Len()), fmt.Errorf("read type byte: %w", err)
+	if err := binary.Read(tr, binary.BigEndian, &m.Type); err != nil {
+		return 0, fmt.Errorf("read type: %w", err)
 	}
-	m.Type = MsgType(rawType[0])
 
 	// Total length is the next uin32 (4 bytes)
-	rawLen := make([]byte, 4)
-	if _, err := io.ReadFull(tr, rawLen); err != nil {
+	if err := binary.Read(tr, binary.BigEndian, &m.Len); err != nil {
 		return int64(fullMsg.Len()), fmt.Errorf("read total length: %w", err)
 	}
-	m.Len = binary.BigEndian.Uint32(rawLen)
 
 	// Read the rest of the message (save for the 5 bytes we already read)
 	contentLen := m.Len - 5
@@ -217,6 +213,15 @@ func (o MsgOK) MarshalBinary() ([]byte, error) {
 // MsgDialAuthority is sent by the client to the Authority Server to establish a connection with a specific authority (site). This message is sent after the Hello message is exchanged and the connection is established. The client should expect a MsgTargetPopulations in response.
 type MsgDialAuthority struct {
 	Site uint32
+}
+
+func (m Message) ToMsgDialAuthority() (MsgDialAuthority, error) {
+	var da MsgDialAuthority
+	if len(m.Content) < 4 {
+		return da, ErrShortMessage
+	}
+	da.Site = binary.BigEndian.Uint32(m.Content)
+	return da, nil
 }
 
 func (d MsgDialAuthority) MarshalBinary() ([]byte, error) {
@@ -387,9 +392,37 @@ func (cp MsgCreatePolicy) MarshalBinary() ([]byte, error) {
 	return msg.MarshalBinary()
 }
 
+func (m Message) ToMsgCreatePolicy() (MsgCreatePolicy, error) {
+	rdr := bytes.NewReader(m.Content)
+
+	var cp MsgCreatePolicy
+	var species Str
+	if _, err := species.ReadFrom(rdr); err != nil {
+		return cp, fmt.Errorf("read species: %w", err)
+	}
+	cp.Species = species.String()
+
+	if err := binary.Read(rdr, binary.BigEndian, &cp.Action); err != nil {
+		return cp, fmt.Errorf("read action: %w", err)
+	}
+
+	return cp, nil
+}
+
 // MsgPolicyResult is sent by the Authority Server in response to a valid MsgCreatePolicy message. It contains the ID of the created policy.
 type MsgPolicyResult struct {
-	Policy uint32
+	PolicyID uint32
+}
+
+func (pr MsgPolicyResult) MarshalBinary() ([]byte, error) {
+	content := make([]byte, 4)
+	binary.BigEndian.PutUint32(content, pr.PolicyID)
+	msg := Message{
+		Type:    MsgTypePolicyResult,
+		Len:     MsgLen(len(content)),
+		Content: content,
+	}
+	return msg.MarshalBinary()
 }
 
 func (m Message) ToMsgPolicyResult() (MsgPolicyResult, error) {
@@ -397,7 +430,7 @@ func (m Message) ToMsgPolicyResult() (MsgPolicyResult, error) {
 	if len(m.Content) < 4 {
 		return pr, ErrShortMessage
 	}
-	pr.Policy = binary.BigEndian.Uint32(m.Content)
+	pr.PolicyID = binary.BigEndian.Uint32(m.Content)
 	return pr, nil
 }
 

@@ -130,6 +130,16 @@ func TestMessage_MarshalBinary(t *testing.T) {
 			},
 		},
 		{
+			name:    "MsgPolicyResult",
+			message: proto.MsgPolicyResult{PolicyID: 123},
+			want: []byte{
+				0x57,                   // PolicyResult{
+				0x00, 0x00, 0x00, 0x0a, // (length 10)
+				0x00, 0x00, 0x00, 0x7b, // policy: 123,
+				0x24, // (checksum 0x24)
+			},
+		},
+		{
 			name:    "MsgDeletePolicy",
 			message: proto.MsgDeletePolicy{Policy: 123},
 			want: []byte{
@@ -216,6 +226,29 @@ func TestMsgTargetPopulations(t *testing.T) {
 	require.Equal(t, wantPopulations, gotPopulations)
 }
 
+func TestMsgCreatePolicy(t *testing.T) {
+	input := []byte{
+		0x55,                   // CreatePolicy{
+		0x00, 0x00, 0x00, 0x0e, // (length 14)
+		0x00, 0x00, 0x00, 0x03, // species: (length 3)
+		0x64, 0x6f, 0x67, // "dog"
+		0xa0, // action: conserve,
+		0xc0, // (checksum 0xc0)
+	}
+
+	wantCreatePolicy := proto.MsgCreatePolicy{Species: "dog", Action: proto.Conserve}
+
+	var gotMessage proto.Message
+	_, err := gotMessage.ReadFrom(bytes.NewReader(input))
+	require.NoError(t, err)
+	require.Equal(t, gotMessage.Type, proto.MsgTypeCreatePolicy)
+	require.Equal(t, gotMessage.Len, uint32(14))
+
+	gotCreatePolicy, err := gotMessage.ToMsgCreatePolicy()
+	require.NoError(t, err)
+	require.Equal(t, wantCreatePolicy, gotCreatePolicy)
+}
+
 func TestMsgPolicyResult(t *testing.T) {
 	input := []byte{
 		0x57,                   // PolicyResult{
@@ -224,7 +257,7 @@ func TestMsgPolicyResult(t *testing.T) {
 		0x24, // (checksum 0x24)
 	}
 
-	wantPolicyResult := proto.MsgPolicyResult{Policy: 123}
+	wantPolicyResult := proto.MsgPolicyResult{PolicyID: 123}
 
 	var gotMessage proto.Message
 	_, err := gotMessage.ReadFrom(bytes.NewReader(input))

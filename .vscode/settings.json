@@ -11,5 +11,9 @@
   "files.associations": {
     "*.sql": "sqlite",
   },
+  "go.testEnvFile": "${workspaceFolder}/.env.test",
+  "gopls": {
+    "ui.navigation.symbolScope": "workspace"
+  },
   "SQL-Formatter-VSCode.dialect": "sqlite",
 }

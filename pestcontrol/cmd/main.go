@@ -61,7 +61,7 @@ func run(ctx context.Context) error {
 
 	go func() {
 		addr := fmt.Sprintf(":%s", port)
-		log.Printf("server starting @: %s\n", addr)
+		log.Printf("pestcontrol server starting @: %s\n", addr)
 		err := srv.ListenAndServe(addr)
 		if err != nil {
 			srvErr <- err

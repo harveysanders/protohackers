@@ -13,10 +13,12 @@ var (
 )
 
 type Site struct {
+	// ID is the unique identifier for the site.
 	ID uint32
 	// TargetPopulations is a map of target population species names to TargetPopulation structs.
 	TargetPopulations map[string]TargetPopulation
-	Policies          map[string]Policy
+	// Policies is a map of species names to Policy structs.
+	Policies map[string]Policy
 }
 
 type TargetPopulation struct {
