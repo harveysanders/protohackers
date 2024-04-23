@@ -111,6 +111,7 @@ func (c *Client) createPolicy(species string, action proto.PolicyAction) (proto.
 	return policyResult, nil
 }
 
+// deletePolicy sends a delete policy message to a dialed site.
 func (c *Client) deletePolicy(policyID uint32) error {
 	msg := proto.MsgDeletePolicy{Policy: policyID}
 	payload, err := msg.MarshalBinary()

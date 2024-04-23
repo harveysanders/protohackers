@@ -122,14 +122,9 @@ func (s *SiteService) GetPolicy(ctx context.Context, siteID uint32, species stri
 	}, nil
 }
 
-func (s *SiteService) DeletePolicy(ctx context.Context, siteID uint32, species string) (pc.Policy, error) {
-	p, err := s.GetPolicy(ctx, siteID, species)
-	if err != nil {
-		return pc.Policy{}, fmt.Errorf("GetPolicy: %w", err)
-	}
-
+func (s *SiteService) DeletePolicy(ctx context.Context, siteID, id uint32) (pc.Policy, error) {
 	deleted, err := s.queries.DeletePolicy(ctx, sqlc.DeletePolicyParams{
-		ID: p.ID,
+		ID: id,
 		DeletedAt: sql.NullString{
 			String: time.Now().Format(time.RFC3339),
 			Valid:  true,
