@@ -450,6 +450,15 @@ func (dp MsgDeletePolicy) MarshalBinary() ([]byte, error) {
 	return msg.MarshalBinary()
 }
 
+func (m Message) ToMsgDeletePolicy() (MsgDeletePolicy, error) {
+	var dp MsgDeletePolicy
+	if len(m.Content) < 4 {
+		return dp, ErrShortMessage
+	}
+	dp.Policy = binary.BigEndian.Uint32(m.Content)
+	return dp, nil
+}
+
 // MsgLen calculates the total length a Message, including the type, length, body, and checksum.
 func MsgLen(bodyLen int) uint32 {
 	// Type (1) + Len (4) + Checksum (1)

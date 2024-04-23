@@ -270,6 +270,27 @@ func TestMsgPolicyResult(t *testing.T) {
 	require.Equal(t, wantPolicyResult, gotPolicyResult)
 }
 
+func TestMsgDeletePolicy(t *testing.T) {
+	input := []byte{
+		0x56,                   // DeletePolicy{
+		0x00, 0x00, 0x00, 0x0a, // (length 10)
+		0x00, 0x00, 0x00, 0x7b, // policy: 123,
+		0x25, // (checksum 0x25)
+	}
+
+	wantDeletePolicy := proto.MsgDeletePolicy{Policy: 123}
+
+	var gotMessage proto.Message
+	_, err := gotMessage.ReadFrom(bytes.NewReader(input))
+	require.NoError(t, err)
+	require.Equal(t, gotMessage.Type, proto.MsgTypeDeletePolicy)
+	require.Equal(t, gotMessage.Len, uint32(10))
+
+	gotDeletePolicy, err := gotMessage.ToMsgDeletePolicy()
+	require.NoError(t, err)
+	require.Equal(t, wantDeletePolicy, gotDeletePolicy)
+}
+
 func TestMsgSiteVisit(t *testing.T) {
 	input := []byte{
 		0x58,                   // SiteVisit{

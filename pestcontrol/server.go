@@ -114,6 +114,7 @@ func (s *Server) handleClient(ctx context.Context, conn net.Conn) {
 	s.logger.Printf("client [%d] connected!\n", connID)
 
 	for {
+		s.logger.Printf("[%d] waiting for message...\n", connID)
 		var msg proto.Message
 		if _, err := msg.ReadFrom(conn); err != nil {
 			s.logger.Printf("[%d] read message from client: %v\n", connID, err)
@@ -306,7 +307,7 @@ func (s *Server) setPolicy(ctx context.Context, siteClient Client, speciesName s
 		}
 
 		s.logger.Printf("new policy (id, %d) for species %q set to %q\n", resp.PolicyID, speciesName, action.String())
-		if err := s.siteStore.SetPolicy(ctx, resp.PolicyID, *siteClient.siteID, speciesName, Conserve); err != nil {
+		if err := s.siteStore.SetPolicy(ctx, resp.PolicyID, *siteClient.siteID, speciesName, action); err != nil {
 			return fmt.Errorf("SetPolicy: %w", err)
 		}
 		return nil
