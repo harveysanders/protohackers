@@ -2,19 +2,26 @@ package pestcontrol_test
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
+	"os"
 	"time"
 
 	"github.com/harveysanders/protohackers/pestcontrol"
 	"github.com/harveysanders/protohackers/pestcontrol/proto"
 )
 
+const (
+	logKeySiteID  = "siteID"
+	logKeyMsgType = "type"
+	logKeySpecies = "species"
+	logKeyPolicy  = "policy"
+)
+
 // MockAuthorityServer is a mock implementation of the Authority server.
 type MockAuthorityServer struct {
-	name string
-	l    net.Listener
-	log  log.Logger
+	l   net.Listener
+	log slog.Logger
 
 	// sites is a map of site IDs to sites.
 	sites map[uint32]site
@@ -32,10 +39,12 @@ type site struct {
 }
 
 func NewMockAuthorityServer() *MockAuthorityServer {
+	logHandler := slog.NewTextHandler(os.Stderr, nil)
+	logger := slog.New(logHandler).With("name", "MockAuthority")
+
 	return &MockAuthorityServer{
-		name:         "Mock Authority",
 		sites:        map[uint32]site{},
-		log:          *log.Default(),
+		log:          *logger,
 		policyChange: make(chan struct{}, 10),
 	}
 }
@@ -66,36 +75,36 @@ func (m *MockAuthorityServer) handleConn(conn net.Conn) {
 	var siteID uint32
 
 	for {
-		m.log.Printf("[%s] waiting for message\n", m.name)
+		m.log.Info("waiting for message")
 		var msg proto.Message
 		if _, err := msg.ReadFrom(conn); err != nil {
-			m.log.Printf("[%s] read message from client: %v\n", m.name, err)
+			m.log.Error(fmt.Sprintf("read message from client: %v", err))
 			return
 		}
 
-		m.log.Printf("[%s] incoming %q msg\n", m.name, msg.Type)
+		m.log.Info("incoming msg", "type", msg.Type)
 
 		switch msg.Type {
 		case proto.MsgTypeHello:
 			resp, _ := proto.MsgHello{}.MarshalBinary()
 			if _, err := conn.Write(resp); err != nil {
-				m.log.Printf("[%s] write hello: %v", m.name, err)
+				m.log.Error(fmt.Sprintf("write hello: %v", err))
 			}
 
 		case proto.MsgTypeDialAuthority:
 			da, err := msg.ToMsgDialAuthority()
 			if err != nil {
-				m.log.Printf("[%s] to dial authority: %v", m.name, err)
+				m.log.Error(fmt.Sprintf("to dial authority: %v", err))
 				return
 			}
 			m.handleDialAuthority(conn, da)
 			siteID = da.Site
-			m.log.Printf("[%s] connection associated with site %d\n", m.name, da.Site)
+			m.log.Info("connection established", logKeySiteID, da.Site)
 
 		case proto.MsgTypeCreatePolicy:
 			cp, err := msg.ToMsgCreatePolicy()
 			if err != nil {
-				m.log.Printf("[%s] to create policy: %v", m.name, err)
+				m.log.Error(fmt.Sprintf("to create policy: %v", err))
 				return
 			}
 			m.handleCreatePolicy(conn, siteID, cp)
@@ -103,12 +112,11 @@ func (m *MockAuthorityServer) handleConn(conn net.Conn) {
 		case proto.MsgTypeDeletePolicy:
 			dp, err := msg.ToMsgDeletePolicy()
 			if err != nil {
-				m.log.Printf("[%s] to delete policy: %v", m.name, err)
+				m.log.Error(fmt.Sprintf("to delete policy: %v", err))
 				return
 			}
 			m.handleDeletePolicy(conn, siteID, dp.Policy)
 		}
-
 	}
 }
 
@@ -116,10 +124,10 @@ func (m *MockAuthorityServer) handleDialAuthority(conn net.Conn, da proto.MsgDia
 	// Make sure we already have the site in our map
 	site, ok := m.sites[da.Site]
 	if !ok {
-		m.log.Printf("[%s] site %d not found\n", m.name, da.Site)
+		m.log.Info("site not found", logKeySiteID, da.Site)
 		resp, _ := proto.MsgError{Message: pestcontrol.ErrSiteNotFound.Error()}.MarshalBinary()
 		if _, err := conn.Write(resp); err != nil {
-			m.log.Printf("[%s] write err resp: %v", m.name, err)
+			m.log.Error(fmt.Sprintf("write err resp: %v", err))
 		}
 	}
 
@@ -139,7 +147,7 @@ func (m *MockAuthorityServer) handleDialAuthority(conn net.Conn, da proto.MsgDia
 	}
 	respData, _ := msg.MarshalBinary()
 	if _, err := conn.Write(respData); err != nil {
-		m.log.Printf("[%s] write target populations: %v", m.name, err)
+		m.log.Error(fmt.Sprintf("write target populations: %v", err))
 	}
 }
 
@@ -147,10 +155,10 @@ func (m *MockAuthorityServer) handleCreatePolicy(conn net.Conn, siteID uint32, c
 	// Make sure we already have the site in our map
 	site, ok := m.sites[siteID]
 	if !ok {
-		m.log.Printf("[%s] site %d not found\n", m.name, siteID)
+		m.log.Info("site not found", logKeySiteID, siteID)
 		resp, _ := proto.MsgError{Message: pestcontrol.ErrSiteNotFound.Error()}.MarshalBinary()
 		if _, err := conn.Write(resp); err != nil {
-			m.log.Printf("[%s] write err resp: %v", m.name, err)
+			m.log.Error(fmt.Sprintf("write err resp: %v", err))
 			return
 		}
 	}
@@ -158,7 +166,7 @@ func (m *MockAuthorityServer) handleCreatePolicy(conn net.Conn, siteID uint32, c
 	speciesPolicies, ok := site.policies[cp.Species]
 	if ok && !isEmpty(speciesPolicies) {
 		p := speciesPolicies[len(speciesPolicies)-1]
-		m.log.Printf("[%s] %d policies already exist for species %s\n", m.name, len(speciesPolicies), cp.Species)
+		m.log.Info("policies already exist", "count", len(speciesPolicies), logKeySpecies, cp.Species)
 		resp, _ := proto.MsgError{
 			Message: fmt.Sprintf(
 				"%q policy already exists for species %q",
@@ -167,7 +175,7 @@ func (m *MockAuthorityServer) handleCreatePolicy(conn net.Conn, siteID uint32, c
 		}.MarshalBinary()
 
 		if _, err := conn.Write(resp); err != nil {
-			m.log.Printf("[%s] write err resp: %v", m.name, err)
+			m.log.Error(fmt.Sprintf("write err resp: %v", err))
 			return
 		}
 		return
@@ -185,7 +193,7 @@ func (m *MockAuthorityServer) handleCreatePolicy(conn net.Conn, siteID uint32, c
 		PolicyID: policyID,
 	}.MarshalBinary()
 	if _, err := conn.Write(resp); err != nil {
-		m.log.Printf("[%s] write policy result: %v", m.name, err)
+		m.log.Error(fmt.Sprintf("write policy result: %v", err))
 		return
 	}
 
@@ -197,10 +205,10 @@ func (m *MockAuthorityServer) handleDeletePolicy(conn net.Conn, siteID, policyID
 	// Make sure we already have the site in our map
 	site, ok := m.sites[siteID]
 	if !ok {
-		m.log.Printf("[%s] site %d not found\n", m.name, siteID)
+		m.log.Info("site %d not found", logKeySiteID, siteID)
 		resp, _ := proto.MsgError{Message: pestcontrol.ErrSiteNotFound.Error()}.MarshalBinary()
 		if _, err := conn.Write(resp); err != nil {
-			m.log.Printf("[%s] write err resp: %v", m.name, err)
+			m.log.Error(fmt.Sprintf("write err resp: %v", err))
 		}
 	}
 
@@ -209,12 +217,12 @@ func (m *MockAuthorityServer) handleDeletePolicy(conn net.Conn, siteID, policyID
 		for j, p := range speciesPolicies {
 			if p.ID == policyID && p.DeletedAt.IsZero() {
 				p.DeletedAt = time.Now()
-				m.log.Printf("[%s] policy %d deleted\n", m.name, policyID)
+				m.log.Info("policy deleted", logKeyPolicy, policyID)
 				speciesPolicies[j] = p
 				site.policies[i] = speciesPolicies
 				resp, _ := proto.MsgOK{}.MarshalBinary()
 				if _, err := conn.Write(resp); err != nil {
-					m.log.Printf("[%s] write ok resp: %v", m.name, err)
+					m.log.Error(fmt.Sprintf("write ok resp: %v", err))
 				}
 				return
 			}
@@ -222,7 +230,7 @@ func (m *MockAuthorityServer) handleDeletePolicy(conn net.Conn, siteID, policyID
 	}
 	resp, _ := proto.MsgError{Message: pestcontrol.ErrPolicyNotFound.Error()}.MarshalBinary()
 	if _, err := conn.Write(resp); err != nil {
-		m.log.Printf("[%s] write err resp: %v", m.name, err)
+		m.log.Error(fmt.Sprintf("write err resp: %v", err))
 		return
 	}
 }
