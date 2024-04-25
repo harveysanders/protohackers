@@ -151,7 +151,7 @@ func (s *SiteService) SetTargetPopulations(ctx context.Context, siteID uint32, p
 	site, err := s.GetSite(ctx, siteID)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			return err
+			return fmt.Errorf("service.GetSite: %w", err)
 		}
 		site = pc.Site{ID: siteID}
 	}
@@ -161,7 +161,10 @@ func (s *SiteService) SetTargetPopulations(ctx context.Context, siteID uint32, p
 		for _, pop := range pops {
 			site.TargetPopulations[pop.Species] = pop
 		}
-		return s.AddSite(ctx, site)
+		if err := s.AddSite(ctx, site); err != nil {
+			return fmt.Errorf("service.AddSite: %w", err)
+		}
+		return nil
 	}
 	return nil
 }

@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
+	"os"
 	"sync"
 
 	"github.com/harveysanders/protohackers/pestcontrol/proto"
@@ -14,6 +15,13 @@ import (
 type contextKey string
 
 const ctxKeyConnectionID = contextKey("github.com/harveysanders/protohackers/pestcontrol:connection_ID")
+
+const (
+	logKeyMsgType      = "type"
+	logKeyPolicy       = "policy"
+	logKeySpecies      = "species"
+	logKeyPolicyAction = "action"
+)
 
 var (
 	errServerError = errors.New("server error")
@@ -44,21 +52,41 @@ type Store interface {
 	GetObservation(ctx context.Context, siteID uint32, species string) (Observation, error)
 }
 
+type contextHandler struct {
+	slog.Handler
+	keys []contextKey
+}
+
+func (h contextHandler) Handle(ctx context.Context, r slog.Record) error {
+	for _, k := range h.keys {
+		attr, ok := ctx.Value(k).(slog.Attr)
+		if !ok {
+			continue
+		}
+		r.AddAttrs(attr)
+	}
+	return h.Handler.Handle(ctx, r)
+}
+
 type Server struct {
 	authSrv   *AuthorityServer
-	logger    *log.Logger
+	logger    *slog.Logger
 	siteStore Store
 }
 
-func NewServer(logger *log.Logger, config ServerConfig, siteStore Store) *Server {
+func NewServer(logger *slog.Logger, config ServerConfig, siteStore Store) *Server {
 	authSrv := &AuthorityServer{
 		addr: config.AuthServerAddr,
 		// TODO: Figure out a good initial capacity for the sites map.
 		sites: make(map[uint32]Client, 200),
 	}
 
+	ctxHandler := contextHandler{
+		slog.NewTextHandler(os.Stderr, nil),
+		[]contextKey{ctxKeyConnectionID},
+	}
 	if logger == nil {
-		logger = log.Default()
+		logger = slog.New(ctxHandler).With("name", "PestcontrolServer")
 	}
 	return &Server{
 		authSrv:   authSrv,
@@ -105,73 +133,68 @@ func (s *Server) Close() error {
 func (s *Server) handleClient(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
-	connID, ok := ctx.Value(ctxKeyConnectionID).(uint32)
-	if !ok {
-		s.logger.Println("invalid connection ID in context")
-		return
-	}
-
-	s.logger.Printf("client [%d] connected!\n", connID)
+	s.logger.InfoContext(ctx, "client connected!")
 
 	for {
-		s.logger.Printf("[%d] waiting for message...\n", connID)
+		s.logger.InfoContext(ctx, "waiting for message...")
 		var msg proto.Message
 		if _, err := msg.ReadFrom(conn); err != nil {
-			s.logger.Printf("[%d] read message from client: %v\n", connID, err)
+			s.logger.ErrorContext(ctx, fmt.Sprintf("read message from client: %v", err))
 			return
 		}
 
+		msgLogger := s.logger.With(logKeyMsgType, msg.Type)
 		switch msg.Type {
 		case proto.MsgTypeHello:
-			s.logger.Printf("[%d]: MsgTypeHello\n", connID)
+			msgLogger.InfoContext(ctx, "msg")
 			_, err := msg.ToMsgHello()
 			if err != nil {
-				s.logger.Printf("msg.ToMsgHello: %v\n", err)
-				s.sendErrorResp(conn, errors.New("invalid hello message"))
+				msgLogger.ErrorContext(ctx, fmt.Sprintf("msg.ToMsgHello: %v", err))
+				s.sendErrorResp(ctx, conn, errors.New("invalid hello message"))
 				return
 			}
 			if err := s.handleHello(ctx, conn); err != nil {
-				s.logger.Printf("handleHello: %v\n", err)
-				s.sendErrorResp(conn, errServerError)
+				msgLogger.ErrorContext(ctx, fmt.Sprintf("handleHello: %v", err))
+				s.sendErrorResp(ctx, conn, errServerError)
 				return
 			}
 		case proto.MsgTypeError:
-			s.logger.Printf("[%d]: MsgTypeError\n", connID)
+			msgLogger.InfoContext(ctx, "msg")
 		case proto.MsgTypeOK:
-			s.logger.Printf("[%d]: MsgTypeOK\n", connID)
+			msgLogger.InfoContext(ctx, "msg")
 		case proto.MsgTypeSiteVisit:
-			s.logger.Printf("[%d]: MsgTypeSiteVisit\n", connID)
+			msgLogger.InfoContext(ctx, "msg")
 			sv, err := msg.ToMsgSiteVisit()
 			if err != nil {
-				s.logger.Printf("msg.ToMsgSiteVisit: %v\n", err)
-				s.sendErrorResp(conn, errors.New("invalid site visit message"))
+				msgLogger.ErrorContext(ctx, fmt.Sprintf("msg.ToMsgSiteVisit: %v", err))
+				s.sendErrorResp(ctx, conn, errors.New("invalid site visit message"))
 				return
 			}
 			if err := s.handleSiteVisit(ctx, sv); err != nil {
-				s.logger.Printf("handleSiteVisit: %v\n", err)
-				s.sendErrorResp(conn, errServerError)
+				msgLogger.ErrorContext(ctx, fmt.Sprintf("handleSiteVisit: %v", err))
+				s.sendErrorResp(ctx, conn, errServerError)
 				return
 			}
 		default:
 			if msg.Type == 0 {
 				return
 			}
-			s.logger.Printf("[%d]: unknown message type %x\n", connID, msg.Type)
-			s.sendErrorResp(conn, errors.New("unknown message type"))
+			msgLogger.InfoContext(ctx, "unknown message type")
+			s.sendErrorResp(ctx, conn, errors.New("unknown message type"))
 			return
 		}
 	}
 }
 
-func (s *Server) sendErrorResp(conn net.Conn, err error) {
+func (s *Server) sendErrorResp(ctx context.Context, conn net.Conn, err error) {
 	resp := proto.MsgError{Message: err.Error()}
 	data, err := resp.MarshalBinary()
 	if err != nil {
-		s.logger.Printf("error.MarshalBinary: %v\n", err)
+		s.logger.ErrorContext(ctx, fmt.Sprintf("error.MarshalBinary: %v", err))
 		return
 	}
 	if _, err := conn.Write(data); err != nil {
-		s.logger.Printf("error resp write: %v\n", err)
+		s.logger.ErrorContext(ctx, fmt.Sprintf("error resp write: %v", err))
 		return
 	}
 }
@@ -197,6 +220,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 		return nil
 	}
 
+	siteLogger := s.logger.With("site", observation.Site)
 	clientID, ok := ctx.Value(ctxKeyConnectionID).(uint32)
 	if !ok {
 		return fmt.Errorf("invalid connection ID in context")
@@ -219,7 +243,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 			return fmt.Errorf("establishSiteConnection: %w", err)
 		}
 
-		s.logger.Printf("received %d target populations from site %d\n", len(resp.Populations), resp.Site)
+		siteLogger.InfoContext(ctx, fmt.Sprintf("received %d target populations\n", len(resp.Populations)))
 		pops := make([]TargetPopulation, 0, len(resp.Populations))
 
 		for _, v := range resp.Populations {
@@ -269,14 +293,14 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 
 		// Check if the observed population is within the target range.
 		if observed.Count < target.Min {
-			s.logger.Printf("(site: %d)\nspecies %q population is below target range\n\n", observation.Site, speciesName)
+			siteLogger.InfoContext(ctx, "population is below target range", logKeySpecies, speciesName)
 			if err := s.setPolicy(ctx, siteClient, speciesName, Conserve); err != nil {
 				return fmt.Errorf("setPolicy: %w", err)
 			}
 		}
 
 		if observed.Count > target.Max {
-			s.logger.Printf("(site: %d)\nspecies %q population is above target range\n\n", observation.Site, speciesName)
+			siteLogger.InfoContext(ctx, "population is above target range", logKeySpecies, speciesName)
 
 			if err := s.setPolicy(ctx, siteClient, speciesName, Cull); err != nil {
 				return fmt.Errorf("setPolicy: %w", err)
@@ -284,7 +308,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 		}
 
 		if target.Min <= observed.Count && observed.Count <= target.Max {
-			s.logger.Printf("(site: %d)\nspecies %q population is within target range\n\n", observation.Site, speciesName)
+			siteLogger.InfoContext(ctx, "population is within target range", logKeySpecies, speciesName)
 			p, err := s.siteStore.GetPolicy(ctx, *siteClient.siteID, speciesName)
 			if err != nil && !errors.Is(err, ErrPolicyNotFound) {
 				return fmt.Errorf("siteStore.GetPolicy: %w", err)
@@ -310,7 +334,7 @@ func (s *Server) setPolicy(ctx context.Context, siteClient Client, speciesName s
 			return fmt.Errorf("createPolicy: %w", err)
 		}
 
-		s.logger.Printf("new policy (id, %d) for species %q set to %q\n", resp.PolicyID, speciesName, action.String())
+		s.logger.InfoContext(ctx, "new policy", logKeyPolicy, resp.PolicyID, logKeySpecies, speciesName, logKeyPolicyAction, action.String())
 		if err := s.siteStore.SetPolicy(ctx, resp.PolicyID, *siteClient.siteID, speciesName, action); err != nil {
 			return fmt.Errorf("SetPolicy: %w", err)
 		}
@@ -326,14 +350,18 @@ func (s *Server) setPolicy(ctx context.Context, siteClient Client, speciesName s
 		if err != nil {
 			return fmt.Errorf("createPolicy: %w", err)
 		}
-		s.logger.Printf("switching policy (%d - %q) to (%d - %q) for species %q\n", existing.ID, existing.Action.String(), resp.PolicyID, action.String(), speciesName)
+		s.logger.InfoContext(ctx, fmt.Sprintf("switching policy to (%d - %s)", resp.PolicyID, action.String()),
+			logKeyPolicy, existing.ID,
+			logKeyPolicyAction, existing.Action.String(),
+			logKeySpecies, speciesName)
+
 		if err := s.siteStore.SetPolicy(ctx, resp.PolicyID, *siteClient.siteID, speciesName, Conserve); err != nil {
 			return fmt.Errorf("SetPolicy: %w", err)
 		}
 		return nil
 	}
 
-	s.logger.Printf("existing policy for species %q, already set to %q\n", speciesName, existing.Action.String())
+	s.logger.InfoContext(ctx, "existing policy, no action", logKeySpecies, speciesName, logKeyPolicyAction, existing.Action.String())
 	return nil
 }
 

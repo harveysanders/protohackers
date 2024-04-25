@@ -31,18 +31,6 @@ func run(ctx context.Context) error {
 		port = PORT
 	}
 
-	logFilePath := os.Getenv("LOG_FILE")
-	logger := log.Default()
-	if logFilePath != "" {
-		logFile, err := os.Create(logFilePath)
-		if err != nil {
-			return err
-		}
-		defer logFile.Close()
-
-		logger = log.New(logFile, "", log.LstdFlags|log.Lshortfile)
-	}
-
 	dsn := "memory:"
 	if DSN := os.Getenv("DSN"); DSN != "" {
 		dsn = DSN
@@ -56,7 +44,7 @@ func run(ctx context.Context) error {
 
 	siteService := sqlite.NewSiteService(db.DB)
 
-	srv := pestcontrol.NewServer(logger, config, siteService)
+	srv := pestcontrol.NewServer(nil, config, siteService)
 	srvErr := make(chan error)
 
 	go func() {
