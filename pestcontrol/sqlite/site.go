@@ -124,7 +124,8 @@ func (s *SiteService) GetPolicy(ctx context.Context, siteID uint32, species stri
 
 func (s *SiteService) DeletePolicy(ctx context.Context, siteID, id uint32) (pc.Policy, error) {
 	deleted, err := s.queries.DeletePolicy(ctx, sqlc.DeletePolicyParams{
-		ID: id,
+		ID:     id,
+		SiteID: siteID,
 		DeletedAt: sql.NullString{
 			String: time.Now().Format(time.RFC3339),
 			Valid:  true,

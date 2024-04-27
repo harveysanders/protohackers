@@ -155,16 +155,25 @@ UPDATE policies
 SET
   deleted_at = ?
 WHERE
-  id = ? RETURNING id, created_at, deleted_at, "action", population_id
+  policies.id = ?
+  AND policies.population_id IN (
+    SELECT
+      id
+    FROM
+      target_populations
+    WHERE
+      site_id = ?
+  ) RETURNING id, created_at, deleted_at, "action", population_id
 `
 
 type DeletePolicyParams struct {
 	DeletedAt sql.NullString
 	ID        uint32
+	SiteID    uint32
 }
 
 func (q *Queries) DeletePolicy(ctx context.Context, arg DeletePolicyParams) (Policy, error) {
-	row := q.db.QueryRowContext(ctx, deletePolicy, arg.DeletedAt, arg.ID)
+	row := q.db.QueryRowContext(ctx, deletePolicy, arg.DeletedAt, arg.ID, arg.SiteID)
 	var i Policy
 	err := row.Scan(
 		&i.ID,

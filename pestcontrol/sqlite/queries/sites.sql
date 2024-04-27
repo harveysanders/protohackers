@@ -95,7 +95,15 @@ UPDATE policies
 SET
   deleted_at = ?
 WHERE
-  id = ? RETURNING *;
+  policies.id = ?
+  AND policies.population_id IN (
+    SELECT
+      id
+    FROM
+      target_populations
+    WHERE
+      site_id = ?
+  ) RETURNING *;
 
 -- name: GetObservationBySpecies :one
 SELECT

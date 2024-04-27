@@ -311,11 +311,15 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 		if target.Min <= observed.Count && observed.Count <= target.Max {
 			siteLogger.InfoContext(ctx, "population is within target range", logKeySpecies, speciesName)
 			p, err := s.siteStore.GetPolicy(ctx, *siteClient.siteID, speciesName)
-			if err != nil && !errors.Is(err, ErrPolicyNotFound) {
-				return fmt.Errorf("siteStore.GetPolicy: %w", err)
+			if err != nil {
+				if !errors.Is(err, ErrPolicyNotFound) {
+					return fmt.Errorf("siteStore.GetPolicy: %w", err)
+				}
+				return nil
 			}
+
 			if err := s.deletePolicy(ctx, siteClient, p.ID); err != nil {
-				return fmt.Errorf("deletePolicy: %w", err)
+				return fmt.Errorf("deletePolicy (site: %d, policy: %d): %w", *siteClient.siteID, p.ID, err)
 			}
 		}
 	}
@@ -349,7 +353,7 @@ func (s *Server) setPolicy(ctx context.Context, siteClient Client, speciesName s
 	//  update it.
 	if existing.Action != action {
 		if err := s.deletePolicy(ctx, siteClient, existing.ID); err != nil {
-			return fmt.Errorf("deletePolicy: %w", err)
+			return fmt.Errorf("deletePolicy (site: %d, policy: %d): %w", *siteClient.siteID, existing.ID, err)
 		}
 		resp, err := siteClient.createPolicy(speciesName, proto.PolicyAction(action))
 		if err != nil {

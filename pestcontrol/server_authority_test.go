@@ -25,8 +25,7 @@ type MockAuthorityServer struct {
 
 	// sites is a map of site IDs to sites.
 	sites map[uint32]site
-	// policyID is the next policy ID to assign for newly created policies.
-	policyID uint32
+
 	// policyChange is a channel sends a message when a policy is created or deleted.
 	policyChange chan struct{}
 }
@@ -34,6 +33,8 @@ type MockAuthorityServer struct {
 type site struct {
 	id                uint32
 	targetPopulations map[string]pestcontrol.TargetPopulation
+	// policyID is the next policy ID to assign for newly created policies. It's a simple incrementing counter. The are only unique per site.
+	policyID uint32
 	// policies is a map of species names to a slice of Policy structs. Each species should settle on a single policy, but can have multiple policies in a transient state. We're using the slice to here to ensure that the final state settles on a single policy. A map would force us to overwrite the previous policy, potentially missing a bug in the system.
 	policies map[string][]pestcontrol.Policy
 }
@@ -181,7 +182,7 @@ func (m *MockAuthorityServer) handleCreatePolicy(conn net.Conn, siteID uint32, c
 		return
 	}
 
-	policyID := m.nextPolicyID()
+	policyID := site.nextPolicyID()
 	site.policies[cp.Species] = []pestcontrol.Policy{{
 		ID:        policyID,
 		Species:   cp.Species,
@@ -233,11 +234,14 @@ func (m *MockAuthorityServer) handleDeletePolicy(conn net.Conn, siteID, policyID
 		m.log.Error(fmt.Sprintf("write err resp: %v", err))
 		return
 	}
+
+	// Notify the policy change
+	m.policyChange <- struct{}{}
 }
 
-func (m *MockAuthorityServer) nextPolicyID() uint32 {
-	m.policyID++
-	return m.policyID
+func (s *site) nextPolicyID() uint32 {
+	s.policyID++
+	return s.policyID
 }
 
 func isEmpty(p []pestcontrol.Policy) bool {

@@ -83,22 +83,7 @@ func TestServer(t *testing.T) {
 		}()
 
 		// Clients sends initial "Hello" message
-		helloMsg := proto.MsgHello{}
-		msg, err := helloMsg.MarshalBinary()
-		require.NoError(t, err)
-
-		_, err = fieldClient.Write(msg)
-		require.NoError(t, err)
-
-		respData := make([]byte, 2048)
-		nRead, err := fieldClient.Read(respData)
-		require.NoError(t, err)
-
-		var resp proto.Message
-		_, err = resp.ReadFrom(bytes.NewReader(respData[:nRead]))
-		require.NoError(t, err)
-		_, err = resp.ToMsgHello()
-		require.NoError(t, err)
+		mustHelloHandshake(t, fieldClient)
 
 		// After "Hello" response,
 		// Send the Site Visit observation (species counts)
@@ -107,7 +92,7 @@ func TestServer(t *testing.T) {
 			Populations: []proto.PopulationCount{{Species: species, Count: 9}},
 		}
 
-		msg, err = observation.MarshalBinary()
+		msg, err := observation.MarshalBinary()
 		require.NoError(t, err)
 
 		_, err = fieldClient.Write(msg)
@@ -212,22 +197,7 @@ func TestServer(t *testing.T) {
 		}()
 
 		// Clients sends initial "Hello" message
-		helloMsg := proto.MsgHello{}
-		msg, err := helloMsg.MarshalBinary()
-		require.NoError(t, err)
-
-		_, err = fieldClient.Write(msg)
-		require.NoError(t, err)
-
-		respData := make([]byte, 2048)
-		nRead, err := fieldClient.Read(respData)
-		require.NoError(t, err)
-
-		var resp proto.Message
-		_, err = resp.ReadFrom(bytes.NewReader(respData[:nRead]))
-		require.NoError(t, err)
-		_, err = resp.ToMsgHello()
-		require.NoError(t, err)
+		mustHelloHandshake(t, fieldClient)
 
 		// After "Hello" response,
 		// Send the Site Visit observation (species counts)
@@ -264,7 +234,7 @@ func TestServer(t *testing.T) {
 		for _, o := range observations {
 			<-o.sendAfter.C
 			log.Println("Sending observation")
-			msg, err = o.msg.MarshalBinary()
+			msg, err := o.msg.MarshalBinary()
 			require.NoError(t, err)
 
 			_, err = fieldClient.Write(msg)
@@ -308,4 +278,161 @@ func TestServer(t *testing.T) {
 		}
 	})
 
+	t.Run("handles observations from multiple sites", func(t *testing.T) {
+		db := sqlite.NewDB(dsn)
+		err := db.Open(true)
+		require.NoError(t, err)
+		defer func() {
+			_ = db.Close()
+		}()
+		require.NoError(t, err)
+
+		pestcontrolAddr := "localhost:12345"
+		authorityAddr := "localhost:20547"
+
+		siteAlpha := site{
+			id: 9876543,
+			targetPopulations: map[string]pestcontrol.TargetPopulation{
+				"blue hoofed pegacorn": {Min: 10, Max: 20},
+			},
+			policies: map[string][]pestcontrol.Policy{},
+		}
+		siteBravo := site{
+			id: 1234567,
+			targetPopulations: map[string]pestcontrol.TargetPopulation{
+				"giant tardigrade": {Min: 1, Max: 5},
+			},
+			policies: map[string][]pestcontrol.Policy{},
+		}
+
+		// Set up mock Authority server
+		authServer := NewMockAuthorityServer()
+		for _, s := range []site{siteAlpha, siteBravo} {
+			authServer.sites[s.id] = s
+		}
+
+		go func() {
+			err := authServer.ListenAndServe(authorityAddr)
+			if err != nil {
+				t.Log(err)
+				return
+			}
+		}()
+		defer func() { _ = authServer.Close() }()
+
+		siteService := sqlite.NewSiteService(db.DB)
+		srv := pestcontrol.NewServer(
+			nil,
+			pestcontrol.ServerConfig{AuthServerAddr: authorityAddr},
+			siteService,
+		)
+
+		go func() {
+			err := srv.ListenAndServe(pestcontrolAddr)
+			if err != nil {
+				t.Log(err)
+				return
+			}
+		}()
+		defer func() { _ = srv.Close() }()
+
+		// wait for server to start
+		time.Sleep(500 * time.Millisecond)
+
+		fieldClient, err := net.Dial("tcp", pestcontrolAddr)
+		require.NoError(t, err)
+		defer func() { _ = fieldClient.Close() }()
+
+		// Clients sends initial "Hello" message
+		mustHelloHandshake(t, fieldClient)
+
+		// Have Pestcontrol service set a policy for the first site
+		type clientLabel string
+		var (
+			alpha clientLabel = "alpha"
+			bravo clientLabel = "bravo"
+		)
+
+		observations := []struct {
+			client    clientLabel
+			sendAfter *time.Timer
+			msg       proto.MsgSiteVisit
+		}{
+			{
+				client:    alpha,
+				sendAfter: time.NewTimer(0),
+				// Should set a "Conserve" policy at site Alpha
+				// with policy ID 1
+				msg: proto.MsgSiteVisit{
+					SiteID:      siteAlpha.id,
+					Populations: []proto.PopulationCount{{Species: "blue hoofed pegacorn", Count: 1}},
+				},
+			},
+			{
+				client:    bravo,
+				sendAfter: time.NewTimer(1 * time.Second),
+				// Should set a "Cull" policy at site Bravo
+				// with policy ID 1 (different site)
+				msg: proto.MsgSiteVisit{
+					SiteID:      siteBravo.id,
+					Populations: []proto.PopulationCount{{Species: "giant tardigrade", Count: 16}},
+				},
+			},
+			{
+				client:    bravo,
+				sendAfter: time.NewTimer(2 * time.Second),
+				// Should remove the "Cull" policy at site Bravo
+				msg: proto.MsgSiteVisit{
+					SiteID:      siteBravo.id,
+					Populations: []proto.PopulationCount{{Species: "giant tardigrade", Count: 3}},
+				},
+			},
+		}
+
+		for _, o := range observations {
+			<-o.sendAfter.C
+			log.Println("Sending observation")
+			msg, err := o.msg.MarshalBinary()
+			require.NoError(t, err)
+
+			_, err = fieldClient.Write(msg)
+			require.NoError(t, err)
+		}
+
+		// TODO: Figure out a more reliable way to wait for the policy changes
+		time.Sleep(4 * time.Second)
+
+		// The Pestcontrol service should have
+		// - created a new "Conserve" policy on the Authority server for site Alpha
+		authSrvPolicies, ok := authServer.sites[siteAlpha.id].policies["blue hoofed pegacorn"]
+		require.True(t, ok, "Authority server should have a policy for the site")
+		require.Len(t, authSrvPolicies, 1)
+
+		// - and should have no policy for site Bravo
+		_, ok = authServer.sites[siteBravo.id].policies["giant tardigrade"]
+		require.True(t, ok, "Authority server should have previously created a 'Cull' policy for the site")
+		require.Len(t, authSrvPolicies, 0, "Authority server should have deleted the policy after population settled in the target range")
+
+	})
+}
+
+func mustHelloHandshake(t *testing.T, c net.Conn) {
+	t.Helper()
+
+	helloMsg := proto.MsgHello{}
+	msg, err := helloMsg.MarshalBinary()
+	require.NoError(t, err)
+
+	_, err = c.Write(msg)
+	require.NoError(t, err)
+
+	respData := make([]byte, 25)
+	nRead, err := c.Read(respData)
+	require.NoError(t, err)
+
+	var resp proto.Message
+	_, err = resp.ReadFrom(bytes.NewReader(respData[:nRead]))
+	require.NoError(t, err)
+	_, err = resp.ToMsgHello()
+	require.NoError(t, err)
 }
