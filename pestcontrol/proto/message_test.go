@@ -90,7 +90,7 @@ func TestMessage_MarshalBinary(t *testing.T) {
 		{
 			name: "MsgSiteVisit",
 			message: proto.MsgSiteVisit{
-				Site: 12345,
+				SiteID: 12345,
 				Populations: []proto.PopulationCount{
 					{Species: "dog", Count: 1},
 					{Species: "rat", Count: 5},
@@ -312,7 +312,7 @@ func TestMsgSiteVisit(t *testing.T) {
 	}
 
 	wantSiteVisit := proto.MsgSiteVisit{
-		Site: 12345,
+		SiteID: 12345,
 		Populations: []proto.PopulationCount{
 			{Species: "dog", Count: 1},
 			{Species: "rat", Count: 5},

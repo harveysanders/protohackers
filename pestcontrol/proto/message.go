@@ -308,13 +308,13 @@ type PopulationCount struct {
 
 // MsgSiteVisit is sent by the client to this server to report the observed species population of a site.
 type MsgSiteVisit struct {
-	Site        uint32
+	SiteID      uint32
 	Populations []PopulationCount
 }
 
 func (sv MsgSiteVisit) MarshalBinary() ([]byte, error) {
 	content := make([]byte, 0, 1024)
-	content = binary.BigEndian.AppendUint32(content, sv.Site)
+	content = binary.BigEndian.AppendUint32(content, sv.SiteID)
 	content = binary.BigEndian.AppendUint32(content, uint32(len(sv.Populations)))
 
 	for _, pop := range sv.Populations {
@@ -337,7 +337,7 @@ func (sv MsgSiteVisit) MarshalBinary() ([]byte, error) {
 func (m Message) ToMsgSiteVisit() (MsgSiteVisit, error) {
 	var sv MsgSiteVisit
 	contentRdr := bytes.NewReader(m.Content)
-	if err := binary.Read(contentRdr, binary.BigEndian, &sv.Site); err != nil {
+	if err := binary.Read(contentRdr, binary.BigEndian, &sv.SiteID); err != nil {
 		return sv, fmt.Errorf("read site: %w", err)
 	}
 	var popLen uint32

@@ -19,8 +19,9 @@ const ctxKeyConnectionID = contextKey("github.com/harveysanders/protohackers/pes
 const (
 	logKeyMsgType      = "type"
 	logKeyPolicy       = "policy"
-	logKeySpecies      = "species"
 	logKeyPolicyAction = "action"
+	logKeySiteID       = "site"
+	logKeySpecies      = "species"
 )
 
 var (
@@ -220,11 +221,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 		return nil
 	}
 
-	siteLogger := s.logger.With("site", observation.Site)
-	clientID, ok := ctx.Value(ctxKeyConnectionID).(uint32)
-	if !ok {
-		return fmt.Errorf("invalid connection ID in context")
-	}
+	siteLogger := s.logger.With(logKeySiteID, observation.SiteID)
 
 	if err := validateSiteVisit(observation); err != nil {
 		return fmt.Errorf("observation.validate: %w", err)
@@ -232,18 +229,18 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 
 	// Check if the server already has a connection to the specified site.
 	s.authSrv.mu.RLock()
-	siteClient, ok := s.authSrv.sites[observation.Site]
+	siteClient, ok := s.authSrv.sites[observation.SiteID]
 	s.authSrv.mu.RUnlock()
 
 	// if not, create a new connection and get the target populations.
 	if !ok {
 		siteClient = Client{}
-		resp, err := siteClient.establishSiteConnection(ctx, s.authSrv.addr, observation.Site)
+		resp, err := siteClient.establishSiteConnection(ctx, s.authSrv.addr, observation.SiteID)
 		if err != nil {
 			return fmt.Errorf("establishSiteConnection: %w", err)
 		}
 
-		siteLogger.InfoContext(ctx, fmt.Sprintf("received %d target populations\n", len(resp.Populations)))
+		siteLogger.InfoContext(ctx, fmt.Sprintf("received %d target populations", len(resp.Populations)))
 		pops := make([]TargetPopulation, 0, len(resp.Populations))
 
 		for _, v := range resp.Populations {
@@ -253,24 +250,28 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 				Max:     v.Max,
 			})
 		}
-		if err := s.siteStore.SetTargetPopulations(ctx, observation.Site, pops); err != nil {
+		if err := s.siteStore.SetTargetPopulations(ctx, observation.SiteID, pops); err != nil {
 			return fmt.Errorf("SetTargetPopulations: %w", err)
 		}
 
 		s.authSrv.mu.Lock()
-		s.authSrv.sites[observation.Site] = siteClient
+		s.authSrv.sites[observation.SiteID] = siteClient
 		s.authSrv.mu.Unlock()
 	}
 
 	// Get the persisted target populations for the site+species.
-	site, err := s.siteStore.GetSite(ctx, observation.Site)
+	site, err := s.siteStore.GetSite(ctx, observation.SiteID)
 	if err != nil {
 		return fmt.Errorf("GetSite: %w", err)
 	}
 
+	clientID, ok := ctx.Value(ctxKeyConnectionID).(uint32)
+	if !ok {
+		siteLogger.ErrorContext(ctx, "client ID not found in context")
+	}
 	for _, observed := range observation.Populations {
 		err := s.siteStore.RecordObservation(ctx, Observation{
-			Site:     observation.Site,
+			Site:     observation.SiteID,
 			Species:  observed.Species,
 			Count:    observed.Count,
 			ClientID: clientID,
@@ -282,7 +283,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 
 	for speciesName, target := range site.TargetPopulations {
 		// Get the latest observation for the species.
-		observed, err := s.siteStore.GetObservation(ctx, observation.Site, speciesName)
+		observed, err := s.siteStore.GetObservation(ctx, observation.SiteID, speciesName)
 		if err != nil {
 			if !errors.Is(err, ErrObservationNotFound) {
 				return fmt.Errorf("GetObservation: %w", err)
@@ -322,6 +323,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 }
 
 func (s *Server) setPolicy(ctx context.Context, siteClient Client, speciesName string, action PolicyAction) error {
+	siteLogger := s.logger.With(logKeySiteID, *siteClient.siteID)
 	// Check if we've already set a policy for the species.
 	existing, err := s.siteStore.GetPolicy(ctx, *siteClient.siteID, speciesName)
 	if err != nil {
@@ -334,7 +336,10 @@ func (s *Server) setPolicy(ctx context.Context, siteClient Client, speciesName s
 			return fmt.Errorf("createPolicy: %w", err)
 		}
 
-		s.logger.InfoContext(ctx, "new policy", logKeyPolicy, resp.PolicyID, logKeySpecies, speciesName, logKeyPolicyAction, action.String())
+		siteLogger.InfoContext(ctx, "new policy",
+			logKeyPolicy, resp.PolicyID,
+			logKeySpecies, speciesName,
+			logKeyPolicyAction, action.String())
 		if err := s.siteStore.SetPolicy(ctx, resp.PolicyID, *siteClient.siteID, speciesName, action); err != nil {
 			return fmt.Errorf("SetPolicy: %w", err)
 		}
@@ -350,7 +355,7 @@ func (s *Server) setPolicy(ctx context.Context, siteClient Client, speciesName s
 		if err != nil {
 			return fmt.Errorf("createPolicy: %w", err)
 		}
-		s.logger.InfoContext(ctx, fmt.Sprintf("switching policy to (%d - %s)", resp.PolicyID, action.String()),
+		siteLogger.InfoContext(ctx, fmt.Sprintf("switching policy to (%d - %s)", resp.PolicyID, action.String()),
 			logKeyPolicy, existing.ID,
 			logKeyPolicyAction, existing.Action.String(),
 			logKeySpecies, speciesName)
@@ -361,12 +366,15 @@ func (s *Server) setPolicy(ctx context.Context, siteClient Client, speciesName s
 		return nil
 	}
 
-	s.logger.InfoContext(ctx, "existing policy, no action", logKeySpecies, speciesName, logKeyPolicyAction, existing.Action.String())
+	siteLogger.InfoContext(ctx, "existing policy, no action", logKeySpecies, speciesName, logKeyPolicyAction, existing.Action.String())
 	return nil
 }
 
 // deletePolicy deletes a site's policy from the Authority server and the Pestcontrol DB.
 func (s *Server) deletePolicy(ctx context.Context, siteClient Client, id uint32) error {
+	s.logger.InfoContext(ctx, "deleting policy",
+		logKeySiteID, *siteClient.siteID,
+		logKeyPolicy, id)
 	if err := siteClient.deletePolicy(id); err != nil {
 		return fmt.Errorf("authority server deletePolicy: %w", err)
 	}

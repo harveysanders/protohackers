@@ -103,7 +103,7 @@ func TestServer(t *testing.T) {
 		// After "Hello" response,
 		// Send the Site Visit observation (species counts)
 		observation := proto.MsgSiteVisit{
-			Site:        siteID,
+			SiteID:      siteID,
 			Populations: []proto.PopulationCount{{Species: species, Count: 9}},
 		}
 
@@ -238,25 +238,25 @@ func TestServer(t *testing.T) {
 			{
 				sendAfter: time.NewTimer(0),
 				msg: proto.MsgSiteVisit{
-					Site:        siteID,
+					SiteID:      siteID,
 					Populations: []proto.PopulationCount{{Species: species, Count: 63}}},
 			},
 			{
 				sendAfter: time.NewTimer(3 * time.Second),
 				msg: proto.MsgSiteVisit{
-					Site:        siteID,
+					SiteID:      siteID,
 					Populations: []proto.PopulationCount{{Species: species, Count: 18}}},
 			},
 			{
 				sendAfter: time.NewTimer(6 * time.Second),
 				msg: proto.MsgSiteVisit{
-					Site:        siteID,
+					SiteID:      siteID,
 					Populations: []proto.PopulationCount{{Species: species, Count: 55}}},
 			},
 			{
 				sendAfter: time.NewTimer(9 * time.Second),
 				msg: proto.MsgSiteVisit{
-					Site:        siteID,
+					SiteID:      siteID,
 					Populations: []proto.PopulationCount{{Species: species, Count: 63}}},
 			},
 		}

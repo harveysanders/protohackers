@@ -34,14 +34,14 @@ func (s *SiteService) AddSite(ctx context.Context, site pc.Site) error {
 	for _, pop := range site.TargetPopulations {
 		species, err := s.queries.GetSpeciesByName(ctx, pop.Species)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("queries.GetSpeciesByName: %w", err)
+			return fmt.Errorf("queries.GetSpeciesByName (species: %s): %w", pop.Species, err)
 		}
 		if species.Name == "" {
 			species, err = s.queries.CreateSpecies(ctx, sqlc.CreateSpeciesParams{
 				Name:      pop.Species,
 				CreatedAt: time.Now().Format(time.RFC3339)})
 			if err != nil {
-				return fmt.Errorf("queries.CreateSpecies: %w", err)
+				return fmt.Errorf("queries.CreateSpecies (species: %s): %w", pop.Species, err)
 			}
 		}
 		_, err = s.queries.CreateTargetPopulation(ctx, sqlc.CreateTargetPopulationParams{
@@ -52,7 +52,7 @@ func (s *SiteService) AddSite(ctx context.Context, site pc.Site) error {
 			CreatedAt: time.Now().Format(time.RFC3339),
 		})
 		if err != nil {
-			return fmt.Errorf("queries.CreateTargetPopulation: %w", err)
+			return fmt.Errorf("queries.CreateTargetPopulation (species: %s): %w", pop.Species, err)
 		}
 	}
 	return nil
@@ -151,7 +151,7 @@ func (s *SiteService) SetTargetPopulations(ctx context.Context, siteID uint32, p
 	site, err := s.GetSite(ctx, siteID)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("service.GetSite: %w", err)
+			return fmt.Errorf("service.GetSite (site: %d): %w", siteID, err)
 		}
 		site = pc.Site{ID: siteID}
 	}
@@ -162,7 +162,7 @@ func (s *SiteService) SetTargetPopulations(ctx context.Context, siteID uint32, p
 			site.TargetPopulations[pop.Species] = pop
 		}
 		if err := s.AddSite(ctx, site); err != nil {
-			return fmt.Errorf("service.AddSite: %w", err)
+			return fmt.Errorf("service.AddSite (site: %d): %w", siteID, err)
 		}
 		return nil
 	}
