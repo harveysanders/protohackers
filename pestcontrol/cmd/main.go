@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
 
 	"github.com/harveysanders/protohackers/pestcontrol"
+	plog "github.com/harveysanders/protohackers/pestcontrol/log"
 	"github.com/harveysanders/protohackers/pestcontrol/sqlite"
 )
 
@@ -42,9 +45,26 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("db.Open: %w", err)
 	}
 
+	logFilePath := os.Getenv("LOG_FILE")
+	logFile := io.Discard
+	if logFilePath != "" {
+		f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+		if err != nil {
+			return fmt.Errorf("open log file: %w", err)
+		}
+		defer f.Close()
+		logFile = f
+	}
+
+	logger := slog.New(
+		slog.NewTextHandler(
+			plog.SustainedMultiWriter(os.Stderr, logFile),
+			nil),
+	).With("name", "PestcontrolServer")
+
 	siteService := sqlite.NewSiteService(db.DB)
 
-	srv := pestcontrol.NewServer(nil, config, siteService)
+	srv := pestcontrol.NewServer(logger, config, siteService)
 	srvErr := make(chan error)
 
 	go func() {

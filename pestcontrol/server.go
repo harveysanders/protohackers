@@ -9,12 +9,11 @@ import (
 	"os"
 	"sync"
 
+	"github.com/harveysanders/protohackers/pestcontrol/log"
 	"github.com/harveysanders/protohackers/pestcontrol/proto"
 )
 
-type contextKey string
-
-const ctxKeyConnectionID = contextKey("github.com/harveysanders/protohackers/pestcontrol:connection_ID")
+const ctxKeyConnectionID = log.ContextKey("github.com/harveysanders/protohackers/pestcontrol:connection_ID")
 
 const (
 	logKeyMsgType      = "type"
@@ -53,22 +52,6 @@ type Store interface {
 	GetObservation(ctx context.Context, siteID uint32, species string) (Observation, error)
 }
 
-type contextHandler struct {
-	slog.Handler
-	keys []contextKey
-}
-
-func (h contextHandler) Handle(ctx context.Context, r slog.Record) error {
-	for _, k := range h.keys {
-		attr, ok := ctx.Value(k).(slog.Attr)
-		if !ok {
-			continue
-		}
-		r.AddAttrs(attr)
-	}
-	return h.Handler.Handle(ctx, r)
-}
-
 type Server struct {
 	authSrv   *AuthorityServer
 	logger    *slog.Logger
@@ -82,12 +65,8 @@ func NewServer(logger *slog.Logger, config ServerConfig, siteStore Store) *Serve
 		sites: make(map[uint32]Client, 200),
 	}
 
-	ctxHandler := contextHandler{
-		slog.NewTextHandler(os.Stderr, nil),
-		[]contextKey{ctxKeyConnectionID},
-	}
 	if logger == nil {
-		logger = slog.New(ctxHandler).With("name", "PestcontrolServer")
+		logger = slog.New(slog.NewTextHandler(os.Stderr, nil)).With("name", "PestcontrolServer")
 	}
 	return &Server{
 		authSrv:   authSrv,
@@ -222,6 +201,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 	}
 
 	siteLogger := s.logger.With(logKeySiteID, observation.SiteID)
+	siteLogger.InfoContext(ctx, "site visit")
 
 	if err := validateSiteVisit(observation); err != nil {
 		return fmt.Errorf("observation.validate: %w", err)
@@ -259,6 +239,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 		s.authSrv.mu.Unlock()
 	}
 
+	siteLogger.InfoContext(ctx, fmt.Sprintf("recording observation for %d species", len(observation.Populations)))
 	// Get the persisted target populations for the site+species.
 	site, err := s.siteStore.GetSite(ctx, observation.SiteID)
 	if err != nil {
@@ -267,7 +248,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 
 	clientID, ok := ctx.Value(ctxKeyConnectionID).(uint32)
 	if !ok {
-		siteLogger.ErrorContext(ctx, "client ID not found in context")
+		return errors.New("connection ID not found in context")
 	}
 	for _, observed := range observation.Populations {
 		err := s.siteStore.RecordObservation(ctx, Observation{
@@ -298,6 +279,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 			if err := s.setPolicy(ctx, siteClient, speciesName, Conserve); err != nil {
 				return fmt.Errorf("setPolicy: %w", err)
 			}
+			continue
 		}
 
 		if observed.Count > target.Max {
@@ -306,6 +288,7 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 			if err := s.setPolicy(ctx, siteClient, speciesName, Cull); err != nil {
 				return fmt.Errorf("setPolicy: %w", err)
 			}
+			continue
 		}
 
 		if target.Min <= observed.Count && observed.Count <= target.Max {
@@ -317,11 +300,13 @@ func (s *Server) handleSiteVisit(ctx context.Context, observation proto.MsgSiteV
 				}
 				return nil
 			}
-
 			if err := s.deletePolicy(ctx, siteClient, p.ID); err != nil {
 				return fmt.Errorf("deletePolicy (site: %d, policy: %d): %w", *siteClient.siteID, p.ID, err)
 			}
+			continue
 		}
+
+		siteLogger.WarnContext(ctx, "unknown population state", logKeySpecies, speciesName)
 	}
 	return nil
 }
